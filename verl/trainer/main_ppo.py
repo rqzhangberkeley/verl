@@ -70,15 +70,15 @@ def run_ppo(config) -> None:
 
     ray.get(main_task.remote(config))
 
-
+# RZ: The @ray.remote decorator is used to define a function or class that can be executed in parallel. When you decorate a function with @ray.remote, it becomes a remote function. When you decorate a class, it becomes an actor.
 @ray.remote(num_cpus=1)  # please make sure main_task is not scheduled on head
 def main_task(config):
     from verl.utils.fs import copy_to_local
     # print initial config
     from pprint import pprint
     from omegaconf import OmegaConf
-    pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
-    OmegaConf.resolve(config)
+    pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values # to_container() converts the config object, which is an OmegaConf object, into a standard Python container (like a dictionary or list). The resolve=True argument ensures that any interpolations or references within the configuration are evaluated and replaced with their actual values before conversion. This is useful for debugging or logging the configuration in a human-readable format.
+    OmegaConf.resolve(config) # RZ: resolves all interpolations and references within the config object in place.
 
     # download the checkpoint from hdfs
     local_path = copy_to_local(config.actor_rollout_ref.model.path)
@@ -128,8 +128,10 @@ def main_task(config):
     # - for code related prompt, we send to a sandbox if there are test cases
     # - finally, we combine all the rewards together
     # - The reward type depends on the tag of the data
+
+    # RZ: These are distributed training strategies. FSDP shards model parameters across devices to save memory, while Megatron is optimized for large-scale models.
     if config.reward_model.enable:
-        if config.reward_model.strategy == 'fsdp':
+        if config.reward_model.strategy == 'fsdp': # RZ: By default, we use fsdp.
             from verl.workers.fsdp_workers import RewardModelWorker
         elif config.reward_model.strategy == 'megatron':
             from verl.workers.megatron_workers import RewardModelWorker
@@ -165,7 +167,7 @@ def main_task(config):
                             reward_fn=reward_fn,
                             val_reward_fn=val_reward_fn)
     trainer.init_workers()
-    trainer.fit()
+    trainer.fit() # RZ: runs as a siongle process.
 
 
 if __name__ == '__main__':

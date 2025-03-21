@@ -83,6 +83,7 @@ if __name__ == '__main__':
     test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
 
     local_dir = args.local_dir
+    os.makedirs(local_dir, exist_ok=True)
     hdfs_dir = args.hdfs_dir
 
     train_dataset.to_parquet(os.path.join(local_dir, 'train.parquet'))
