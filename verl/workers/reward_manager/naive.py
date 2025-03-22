@@ -25,6 +25,7 @@ class NaiveRewardManager:
         self.tokenizer = tokenizer
         self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
         self.compute_score = compute_score or _default_compute_score
+        # RZ: 'or' returns the frist truthly value. So if we provide a compute score function, it will be used. Otherwise, the default one will be used.
 
     def verify(self, data):
         scores = []

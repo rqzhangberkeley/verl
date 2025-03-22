@@ -89,9 +89,11 @@ def main_task(config):
     processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
 
     # define worker classes
+    # RZ: By default we use fsdp.
+    # These are distributed training strategies. FSDP shards model parameters across devices to save memory, while Megatron is optimized for large-scale models.
     if config.actor_rollout_ref.actor.strategy == 'fsdp':
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
-        from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
+        from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker # import WorkerGroup Classes
         from verl.single_controller.ray import RayWorkerGroup
         ray_worker_group_cls = RayWorkerGroup
 
@@ -110,17 +112,24 @@ def main_task(config):
         Role.ActorRollout: ray.remote(ActorRolloutRefWorker),
         Role.Critic: ray.remote(CriticWorker),
         Role.RefPolicy: ray.remote(ActorRolloutRefWorker)
-    }
+    } # maps roles (like ActorRollout, Critic, and RefPolicy) to their corresponding Ray remote worker classes. It defines which worker class should be used for each role.
 
     global_pool_id = 'global_pool'
     resource_pool_spec = {
         global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
-    }
+    } # specifies the resources available in the global pool, such as the number of GPUs per node.
     mapping = {
         Role.ActorRollout: global_pool_id,
         Role.Critic: global_pool_id,
         Role.RefPolicy: global_pool_id,
-    }
+    } # maps roles to the global pool, indicating that all roles share the same resource pool.
+
+    # The RayPPOTrainer maintains Worker and WorkerGrpoup Construction.
+    # Each workerGroup manages a list of workers that runs remotely. Note that the worker group runs in the process of its construtor. Each worker inside the WorkerGroup runs on a GPU. The worker group serves as a proxy for the controller process to interact with a list of workers, in order to perform certain computations.
+    # In PPO, we define 3 worker groups:
+    # 1. ActorRolloutRef: generate rollout trajectories
+    # 2. Critic: evaluate the quality of the trajectories
+    # 3. Reward: compute the reward for the trajectories
 
     # we should adopt a multi-source reward function here
     # - for rule-based rm, we directly call a reward score
@@ -132,17 +141,17 @@ def main_task(config):
     # RZ: These are distributed training strategies. FSDP shards model parameters across devices to save memory, while Megatron is optimized for large-scale models.
     if config.reward_model.enable:
         if config.reward_model.strategy == 'fsdp': # RZ: By default, we use fsdp.
-            from verl.workers.fsdp_workers import RewardModelWorker
+            from verl.workers.fsdp_workers import RewardModelWorker # import RewardModelWorker Class
         elif config.reward_model.strategy == 'megatron':
             from verl.workers.megatron_workers import RewardModelWorker
         else:
             raise NotImplementedError
-        role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
-        mapping[Role.RewardModel] = global_pool_id
+        role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker) # RZ: maps the RewardModel role to the RewardModelWorker class.
+        mapping[Role.RewardModel] = global_pool_id # RZ: maps the RewardModel role to the global pool, indicating that all roles share the same resource pool.
 
     reward_manager_name = config.reward_model.get("reward_manager", "naive")
-    if reward_manager_name == 'naive':
-        from verl.workers.reward_manager import NaiveRewardManager
+    if reward_manager_name == 'naive': # RZ: By default, we use the naive reward manager.
+        from verl.workers.reward_manager import NaiveRewardManager # import NaiveRewardManager Class
         reward_manager_cls = NaiveRewardManager
     elif reward_manager_name == 'prime':
         from verl.workers.reward_manager import PrimeRewardManager
@@ -167,7 +176,7 @@ def main_task(config):
                             reward_fn=reward_fn,
                             val_reward_fn=val_reward_fn)
     trainer.init_workers()
-    trainer.fit() # RZ: runs as a siongle process.
+    trainer.fit() # RZ: runs as a single process.
 
 
 if __name__ == '__main__':

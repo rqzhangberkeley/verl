@@ -460,11 +460,12 @@ class RayPPOTrainer(object):
         ) == 1, "Validation dataloader must have a single batch, which inference engines will schedule the memory themselves."
 
         print(f'Size of train dataloader: {len(self.train_dataloader)}')
+        print(f'Size of val dataloader: {len(self.val_dataloader)}') # RZ: This must be one.
 
         # inject total_training_steps to actor/critic optim_config. This is hacky.
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
-        if self.config.trainer.total_training_steps is not None:
+        if self.config.trainer.total_training_steps is not None: # RZ: By default this is None.
             total_training_steps = self.config.trainer.total_training_steps
 
         self.total_training_steps = total_training_steps
@@ -783,7 +784,7 @@ class RayPPOTrainer(object):
             val_metrics = self._validate()
             pprint(f'Initial validation metrics: {val_metrics}')
             logger.log(data=val_metrics, step=self.global_steps)
-            if self.config.trainer.get('val_only', False):
+            if self.config.trainer.get('val_only', False): # not training.
                 return
 
         # we start from step 1
@@ -815,6 +816,8 @@ class RayPPOTrainer(object):
                     # generate a batch
                     with _timer('gen', timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                        # RZ: A syntax sugar to encapsulate the 3 processes into a single call from the controller process.
+                        # RZ: 1. Split the data into data parallel sizes; 2. Dispatch the corresponding data into each worker 3. Collect and concatenate the data when the computation finishes
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer('gen_max', timing_raw):
@@ -835,6 +838,7 @@ class RayPPOTrainer(object):
                     batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                              dtype=object)
                     # repeat to align with repeated responses in rollout
+                    # RZ:  It repeats each prompt element n times so it matches with the structure of the generated responses.
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
 
@@ -900,7 +904,7 @@ class RayPPOTrainer(object):
                         critic_output_metrics = reduce_metrics(critic_output.meta_info['metrics'])
                         metrics.update(critic_output_metrics)
 
-                    # implement critic warmup
+                    # implement critic warmup, by default the critic_warmup is 0.
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with _timer('update_actor', timing_raw):
@@ -910,7 +914,7 @@ class RayPPOTrainer(object):
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
-                        (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0):
+                        (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0): # RZ: when it is ready for validation.
                         with _timer('testing', timing_raw):
                             val_metrics: dict = self._validate()
                             if is_last_step:

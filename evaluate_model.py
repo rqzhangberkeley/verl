@@ -9,10 +9,12 @@ import numpy as np
 from datetime import datetime
 
 def get_model_type(model_name):
-    if model_name in ['Qwen/Qwen2.5-Math-1.5B','Qwen/Qwen2.5-Math-7B']:
+    if model_name in ['Qwen/Qwen2.5-Math-1.5B','Qwen/Qwen2.5-Math-7B', 'Qwen/Qwen2.5-Math-14B', 'Qwen/Qwen2.5-Math-32B', 'Qwen/Qwen2.5-Math-0.5B']:
         return 'base'
-    elif model_name in ['deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B','deepseek-ai/DeepSeek-R1-Distill-Qwen-7B']:
+    elif model_name in ['deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B','deepseek-ai/DeepSeek-R1-Distill-Qwen-7B', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-14B', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-0.5B']:
         return 'distill'
+    elif model_name in ['Qwen/Qwen2.5-0.5B-Instruct', 'Qwen/Qwen2.5-1.5B-Instruct', 'Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-14B-Instruct', 'Qwen/Qwen2.5-32B-Instruct']:
+        return 'instruct'
     else:
         raise ValueError(f"Model {model_name} not supported.")
 
@@ -132,6 +134,14 @@ def evaluate_model(model_name,
             prompt_tokens = "Please reason step by step, and put your final answer within \\boxed{{}}. Question: " + x[question_key]
             prompt_tokens = model.llm_engine.tokenizer.tokenizer.encode(prompt_tokens, add_special_tokens=False)
             test_prompts.append(prompt_tokens)
+        elif get_model_type(model_name) == 'instruct':
+            # RZ: now we change the prompt to verl's style. This does not change the results.
+            prompt_tokens = [{
+                "role": "user",
+                "content": f"{x[question_key]} Let's think step by step and output the final answer within \\boxed{{}}.",
+            }]
+            prompt_tokens = model.llm_engine.tokenizer.tokenizer.apply_chat_template(prompt_tokens, add_generation_prompt=True)
+            test_prompts.append(prompt_tokens)
         else:
             raise NotImplementedError
     
@@ -198,9 +208,9 @@ if __name__ == "__main__":
 
     if scale == 'auto':
         for model_path in model_paths:
-            if not any(size in model_path for size in ['1.5B', '7B', '14B', '32B']):
-                raise ValueError(f"Model path {model_path} must contain a param size, e.g. '1.5B' or '7B' or '14B' or '32B'")
-            for size in ['1.5B', '7B', '14B', '32B']:
+            if not any(size in model_path for size in ['1.5B', '7B', '14B', '32B', '0.5B']):
+                raise ValueError(f"Model path {model_path} must contain a param size, e.g. '1.5B' or '7B' or '14B' or '32B' or '0.5B'")
+            for size in ['1.5B', '7B', '14B', '32B', '0.5B']:
                 if size in model_path:
                     model_scales.append(size)
                     continue
@@ -249,6 +259,13 @@ if __name__ == "__main__":
         TEST_TEMPERATURE = 0.6
         MAX_TEST_SAMPLES = 1389
         DATASET_SPLIT = 'train'
+    elif dataset_name == "DigitalLearningGmbH/MATH-lighteval":
+        dataset = load_dataset("DigitalLearningGmbH/MATH-lighteval", "default")
+        TEST_N = 8
+        MAX_TOKENS = tok_limit
+        TEST_TEMPERATURE = 0.6
+        MAX_TEST_SAMPLES = 5000
+        DATASET_SPLIT = 'test'
     else:
         raise ValueError(f"Dataset {dataset_name} not supported.")
 
