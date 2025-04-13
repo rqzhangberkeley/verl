@@ -81,7 +81,7 @@ def main_task(config):
     OmegaConf.resolve(config) # RZ: resolves all interpolations and references within the config object in place.
 
     # download the checkpoint from hdfs
-    local_path = copy_to_local(config.actor_rollout_ref.model.path)
+    local_path = copy_to_local(config.actor_rollout_ref.model.path) # RZ: the actor model path.
 
     # instantiate tokenizer
     from verl.utils import hf_tokenizer, hf_processor

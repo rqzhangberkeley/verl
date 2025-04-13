@@ -156,7 +156,7 @@ def show_column_info(df: pd.DataFrame) -> None:
 if __name__ == "__main__":
     # First check dependencies before attempting to read files
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='LIMO')
+    parser.add_argument('--dataset_name', default='math-base')
     args = parser.parse_args()
 
     if not check_dependencies():
@@ -172,15 +172,32 @@ if __name__ == "__main__":
         print("\nTrain data sample:")
         print(get_dataset_sample(train_df))
         show_column_info(train_df)
+
+        print(f"Column names: {train_df.columns}")
+        print(f"Example row: {train_df.iloc[0]}")
+        print(f"Example row: {train_df.iloc[0]['data_source']}")
+        print(f"Example row: {train_df.iloc[0]['prompt']}")
+        print(f"Example row: {train_df.iloc[0]['ability']}")
+        print(f"Example row: {train_df.iloc[0]['reward_model']}")
+        print(f"Example row: {train_df.iloc[0]['extra_info']}")
+        import pdb; pdb.set_trace()
     except Exception as e:
         print(f"Error processing train data: {e}")
 
-    print(f"Column names: {train_df.columns}")
-    print(f"Example row: {train_df.iloc[0]}")
-    print(f"Example row: {train_df.iloc[0]['data_source']}")
-    print(f"Example row: {train_df.iloc[0]['prompt']}")
-    print(f"Example row: {train_df.iloc[0]['ability']}")
-    print(f"Example row: {train_df.iloc[0]['reward_model']}")
-    print(f"Example row: {train_df.iloc[0]['extra_info']}")
+    try:
+        test_df = read_parquet_file(os.path.join(data_dir, "test.parquet"))
+        print("\nTest data sample:")
+        print(get_dataset_sample(test_df))
+        show_column_info(test_df)
+        print(f"Column names: {test_df.columns}")
+        print(f"Example row: {test_df.iloc[0]}")
+        print(f"Example row: {test_df.iloc[0]['data_source']}")
+        print(f"Example row: {test_df.iloc[0]['prompt']}")
+        print(f"Example row: {test_df.iloc[0]['ability']}")
+        print(f"Example row: {test_df.iloc[0]['reward_model']}")
+        print(f"Example row: {test_df.iloc[0]['extra_info']}")
+    except Exception as e:
+        print(f"Error processing test data: {e}")
+
 
     

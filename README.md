@@ -24,6 +24,9 @@ The codebase prepares the gsm8k and lighteval/MATH datasets for PPO training. Da
 #### Modify the reward function?
 To define a new reward function, just write compute_score() function in a new file in verl/utils/reward_score/ and modify the custom_reward_function.path in verl/trainer/config/ppo_trainer.yaml. If custom_reward_function.path is null, then the RewardManager (see verl/workers/reward_manager/naive.py) will call _default_compute_score() (see verl/utils/reward_score/__init__.py) by default. They implement the reward function for gsm8k (extracting solutions after ####) and lighteval/MATH (using Math-Verify). 
 
+#### Use base model?
+We do not need to specially mute the chat template when using base model here since the RlHFDataset class will automatically add the chat template to the prompt (and it will return raw input text for base models). See Line 164 of verl/utils/dataset/rl_dataset.py. It derecctly calls PreTrainedTokenizer.apply_chat_template() method.
+
 #### Test run
 We tried to run PPO on Qwen2.5/0.5B-Instruct model on gsm8k for 15 epochs (based on the default hyperparameters). The validation accuracy rises from almost zero to about 52% after 15 epochs. The initial accuracy is lower than the standard result reported by Qwen (about 50) or the results from the offline evaluation codebase (45-47), because we are using a different prompt (by asking the model to put the answer after ####), but the model learns to follow this instruction quickly. According to verl's report, their trained 0.5B-Instruct model achieves 56.7 on validation set. We have not reproduced this result yet.
 

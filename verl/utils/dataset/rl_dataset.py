@@ -78,7 +78,7 @@ class RLHFDataset(Dataset):
     """
 
     def __init__(self,
-                 parquet_files: Union[str, List[str]],
+                 parquet_files: Union[str, List[str]], # RZ: A group of dataset.
                  tokenizer: PreTrainedTokenizer,
                  processor: Optional[ProcessorMixin] = None,
                  prompt_key='prompt',
@@ -89,7 +89,9 @@ class RLHFDataset(Dataset):
                  chat_template_func=None,
                  return_raw_chat=False,
                  truncation='error',
-                 filter_overlong_prompts=False):
+                 filter_overlong_prompts=False,
+                 use_chat_template=True # rZ: Added by RZ.
+                 ):
         if not isinstance(parquet_files, (List, ListConfig)):
             parquet_files = [parquet_files]
 
@@ -108,6 +110,7 @@ class RLHFDataset(Dataset):
         self.chat_template_func = chat_template_func
         self.truncation = truncation
         self.filter_overlong_prompts = filter_overlong_prompts
+        self.use_chat_template = use_chat_template
 
         # whether to store the dataset in state_dict()
         # default not store
@@ -127,7 +130,7 @@ class RLHFDataset(Dataset):
             # read parquet files and cache
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
-        self.dataframe = pd.concat(dataframes)
+        self.dataframe = pd.concat(dataframes) # RZ Concatenate all the dataframes.
 
         print(f'dataset len: {len(self.dataframe)}')
 
@@ -135,8 +138,18 @@ class RLHFDataset(Dataset):
         if self.filter_overlong_prompts:
             tokenizer = self.tokenizer
             prompt_key = self.prompt_key
-            self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: len(
-                tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True)) <= self.max_prompt_length,
+            if self.use_chat_template:
+                self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: len(
+                    tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True)) <= self.max_prompt_length,
+                                                                 axis=1)]
+                # RZ: the tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True) returns a list of token IDs.
+            else:
+                # Print an example prompt before filtering
+                example_doc = self.dataframe.iloc[0]
+                print(f"Example prompt before filtering: {example_doc[prompt_key]}")
+                
+                self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: len(
+                    tokenizer.encode(doc[prompt_key], add_special_tokens=False)) <= self.max_prompt_length,
                                                                  axis=1)]
 
             print(f'filter dataset len: {len(self.dataframe)}')
@@ -160,8 +173,23 @@ class RLHFDataset(Dataset):
         row_dict: dict = self.dataframe.iloc[item].to_dict()
 
         chat = row_dict.pop(self.prompt_key)
+        # RZ: A list of dict. The data in the json format: eg: [{'role': 'user', 'content': 'Hello, how are you?'}]
+        # print('chat: ', chat, type(chat))
 
-        prompt_with_chat_template = self.tokenizer.apply_chat_template(chat, add_generation_prompt=True, tokenize=False)
+        # prompt_with_chat_template = chat # RZ: for base model
+        if self.use_chat_template:  # RZ: Added by RZ.
+            prompt_with_chat_template = self.tokenizer.apply_chat_template(chat, add_generation_prompt=True, tokenize=False)
+        else:
+            prompt_with_chat_template = chat
+
+        # RZ: This line equippes the data with chat template. 
+        # RZ: <|im_start|>system
+        # You are a helpful assistant.<|im_end|>
+        # <|im_start|>user
+        # Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\theta),$ where $r > 0$ and $0 \le \theta < 2 \pi.$ Let's think step by step and output the final answer within \boxed{}.<|im_end|>
+        # <|im_start|>assistant
+
+        # RZ: For Qwen2.5-Math-1.5B models, the special tokens are already there.
 
         is_multi_modal = self.image_key in row_dict
         if is_multi_modal:  # expand image token

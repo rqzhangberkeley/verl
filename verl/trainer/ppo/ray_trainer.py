@@ -363,7 +363,9 @@ class RayPPOTrainer(object):
         #    ppo_mini_batch_size is divisible by ppo_micro_batch_size
         #    ppo_micro_batch_size * sequence_parallel_size >= n_gpus
         if not config.actor_rollout_ref.actor.use_dynamic_bsz:
-            assert config.data.train_batch_size >= config.actor_rollout_ref.actor.ppo_mini_batch_size
+
+            #### RZ: ????? #####
+            # assert config.data.train_batch_size >= config.actor_rollout_ref.actor.ppo_mini_batch_size
             sp_size = config.actor_rollout_ref.actor.get('ulysses_sequence_parallel_size', 1)
             if config.actor_rollout_ref.actor.ppo_micro_batch_size is not None:
                 assert config.actor_rollout_ref.actor.ppo_mini_batch_size % config.actor_rollout_ref.actor.ppo_micro_batch_size == 0
@@ -412,7 +414,8 @@ class RayPPOTrainer(object):
                                          filter_prompts=True,
                                          return_raw_chat=self.config.data.get('return_raw_chat', False),
                                          truncation=self.config.data.get('truncation', 'error'),
-                                         filter_overlong_prompts=self.config.data.filter_overlong_prompts)
+                                         filter_overlong_prompts=self.config.data.filter_overlong_prompts,
+                                         use_chat_template=self.config.data.use_chat_template)
         assert self.train_dataset.truncation == self.config.data.get(
             'truncation', 'error'
         ), f'dataset truncation {self.train_dataset.truncation} must be the same as config {self.config.data.get("truncation", "error")}'
@@ -440,7 +443,8 @@ class RayPPOTrainer(object):
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
                                        truncation=self.config.data.get('truncation', 'error'),
-                                       filter_overlong_prompts=self.config.data.filter_overlong_prompts)
+                                       filter_overlong_prompts=self.config.data.filter_overlong_prompts,
+                                       use_chat_template=self.config.data.use_chat_template)
         assert self.val_dataset.truncation == self.config.data.get(
             'truncation', 'error'
         ), f'dataset truncation {self.val_dataset.truncation} must be the same as config {self.config.data.get("truncation", "error")}'
@@ -453,6 +457,7 @@ class RayPPOTrainer(object):
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn)
+        # RZ: Validation dataloader must have a single batch. Why?
 
         assert len(self.train_dataloader) >= 1
         assert len(
@@ -510,6 +515,8 @@ class RayPPOTrainer(object):
         sample_scores = []
 
         for test_data in self.val_dataloader:
+
+            breakpoint()
             test_batch = DataProto.from_single_dict(test_data)
 
             # repeat test batch
@@ -547,6 +554,7 @@ class RayPPOTrainer(object):
 
             # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+            breakpoint()
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
 
             # unpad
@@ -569,6 +577,7 @@ class RayPPOTrainer(object):
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
+            breakpoint()
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
@@ -781,7 +790,7 @@ class RayPPOTrainer(object):
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True):
-            val_metrics = self._validate()
+            val_metrics = self._validate() # RZ: Initial validation.
             pprint(f'Initial validation metrics: {val_metrics}')
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get('val_only', False): # not training.
@@ -797,6 +806,17 @@ class RayPPOTrainer(object):
                 timing_raw = {}
 
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                # RZ: A batch of prompts. Len(batch) = config.data.train_batch_size.
+                # It contains a batch (TensorDict):
+                # TensorDict(
+                # fields={
+                #     attention_mask: Tensor(shape=torch.Size([128, 256]), device=cpu, dtype=torch.int64, is_shared=False),
+                #     input_ids: Tensor(shape=torch.Size([128, 256]), device=cpu, dtype=torch.int64, is_shared=False),
+                #     position_ids: Tensor(shape=torch.Size([128, 256]), device=cpu, dtype=torch.int64, is_shared=False)},
+                # batch_size=torch.Size([128]),
+                # device=None,
+                # is_shared=False)
+
 
                 # pop those keys for generation
                 if 'multi_modal_inputs' in batch.non_tensor_batch.keys():
@@ -809,10 +829,11 @@ class RayPPOTrainer(object):
                         batch_keys=['input_ids', 'attention_mask', 'position_ids'],
                         non_tensor_batch_keys=['raw_prompt_ids'],
                     )
+                    # RZ: type = TensorDict. When this line is run, we no longer have any data in 'batch' and everything is in 'gen_batch'.
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
-                with _timer('step', timing_raw):
+                with _timer('step', timing_raw): # RZ: A context manager to measure the time of the following code.
                     # generate a batch
                     with _timer('gen', timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)

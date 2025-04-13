@@ -17,6 +17,7 @@ Preprocess the GSM8k dataset to parquet format
 
 import os
 import datasets
+import random
 
 from verl.utils.hdfs_io import copy, makedirs
 import argparse
@@ -30,8 +31,11 @@ def extract_solution(solution_str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='~/data/math')
+    parser.add_argument('--local_dir', default='./data/math1000random')
+    parser.add_argument('--model_type', default='instruct')
     parser.add_argument('--hdfs_dir', default=None)
+    parser.add_argument('--sample', default=1000)
+    parser.add_argument('--seed', default=42)
 
     args = parser.parse_args()
 
@@ -56,12 +60,17 @@ if __name__ == '__main__':
 
             answer = example.pop('solution')
             solution = extract_solution(answer)
-            data = {
-                "data_source": data_source,
-                "prompt": [{
+
+            if args.model_type == 'base':
+                prompt = question
+            else:
+                prompt = [{
                     "role": "user",
                     "content": question
-                }],
+                }]
+            data = {
+                "data_source": data_source,
+                "prompt": prompt,
                 "ability": "math",
                 "reward_model": {
                     "style": "rule",
@@ -76,7 +85,21 @@ if __name__ == '__main__':
 
         return process_fn
 
+    # Map the full dataset first
     train_dataset = train_dataset.map(function=make_map_fn('train'), with_indices=True)
+
+    # Random sample 1000 examples from training dataset
+    if args.sample:
+        total_samples = 1000
+        all_indices = list(range(len(train_dataset)))
+        random.seed(args.seed)
+        sampled_indices = random.sample(all_indices, total_samples)
+        train_dataset = train_dataset.select(sampled_indices)
+
+    # Take a subset of the first 1000 examples
+    # train_dataset = train_dataset.filter(lambda x: x['level'] == 'Level 5')
+    # train_dataset = train_dataset.select(range(1100))
+
     test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
 
     local_dir = args.local_dir

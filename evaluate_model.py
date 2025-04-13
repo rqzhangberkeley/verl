@@ -130,20 +130,20 @@ def evaluate_model(model_name,
     test_ds = dataset[dataset_split].shuffle(seed=0).select(range(min(max_test_samples, len(dataset[dataset_split]))))
     
     for x in test_ds:
-        if get_model_type(model_name) == 'base':
-            prompt_tokens = "Please reason step by step, and put your final answer within \\boxed{{}}. Question: " + x[question_key]
-            prompt_tokens = model.llm_engine.tokenizer.tokenizer.encode(prompt_tokens, add_special_tokens=False)
-            test_prompts.append(prompt_tokens)
-        elif get_model_type(model_name) == 'instruct':
+        # if get_model_type(model_name) == 'base':
+        #     prompt_tokens = "Please reason step by step, and put your final answer within \\boxed{{}}. Question: " + x[question_key]
+        #     prompt_tokens = model.llm_engine.tokenizer.tokenizer.encode(prompt_tokens, add_special_tokens=False)
+        #     test_prompts.append(prompt_tokens)
+        # elif get_model_type(model_name) == 'instruct':
             # RZ: now we change the prompt to verl's style. This does not change the results.
-            prompt_tokens = [{
-                "role": "user",
-                "content": f"{x[question_key]} Let's think step by step and output the final answer within \\boxed{{}}.",
-            }]
-            prompt_tokens = model.llm_engine.tokenizer.tokenizer.apply_chat_template(prompt_tokens, add_generation_prompt=True)
-            test_prompts.append(prompt_tokens)
-        else:
-            raise NotImplementedError
+        prompt_tokens = [{
+            "role": "user",
+            "content": f"{x[question_key]} Let's think step by step and output the final answer within \\boxed{{}}.",
+        }]
+        prompt_tokens = model.llm_engine.tokenizer.tokenizer.apply_chat_template(prompt_tokens, add_generation_prompt=True)
+        test_prompts.append(prompt_tokens)
+        # else:
+        #     raise NotImplementedError
     
     sampling_params = SamplingParams(
         temperature=test_temperature,
@@ -233,7 +233,7 @@ if __name__ == "__main__":
         DATASET_SPLIT = 'test'
     elif dataset_name == 'di-zhang-fdu/MATH500':
         dataset = load_dataset(dataset_name)
-        TEST_N = 8
+        TEST_N = 1
         MAX_TOKENS = tok_limit
         TEST_TEMPERATURE = 0.6
         MAX_TEST_SAMPLES = 500

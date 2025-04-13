@@ -181,7 +181,7 @@ def compute_rloo_outcome_advantage(token_level_rewards: torch.Tensor,
     with torch.no_grad():
         bsz = scores.shape[0]
         for i in range(bsz):
-            id2score[index[i]].append(scores[i])
+            id2score[index[i]].append(scores[i]) # RZ: index[i] is the index of the prompt in the batch
         for idx in id2score:
             if len(id2score[idx]) == 1:
                 id2mean[idx] = torch.tensor(0.0)
