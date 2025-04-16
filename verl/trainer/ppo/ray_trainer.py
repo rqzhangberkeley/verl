@@ -582,13 +582,16 @@ class RayPPOTrainer(object):
             sample_outputs.extend(output_texts)
 
             test_batch = test_batch.union(test_output_gen_batch)
-            
+
             # RZ: Compute the value of prompts.
             if self.config.actor_rollout_ref.rollout.compute_prompts_values:
                 pprint('Compute the value of prompts.')
-                values = self.critic_wg.compute_prompts_values(test_batch)
+                values = self.critic_wg.compute_prompts_values(test_batch) # RZ: shape = (batch_size, seq_len)
                 breakpoint()
-                # TODO: RZ: Compute the value of prompts.
+                # TODO: RZ: We already have the tesor-type values. How can we use them to compute the value of prompts?
+                # TODO: RZ: Log the values of prompts.
+                # TODO; RZ: For those prompts that have high/low pass rate, we can compute the value of prompts and see the accuracy.
+                # TODO; RZ: Handle multiple completions per prompt.
                 pass
             else:
                 pprint('Do not compute the values of prompts.')
