@@ -11,8 +11,8 @@ TOTAL_EPOCHS=${7:-10}
 MAX_RESPONSE_LENGTH=${8:-1024}
 GPU_MEMORY_UTIL=${9:-0.7}
 TEST_FREQ=${10:-10}
-N_GPUS=${11:-2}
-EXPERIMENT_NAME=${12:-"ppo_experiment_Math1.5B"}
+N_GPUS=${11:-4}
+EXPERIMENT_NAME=${12:-"ppo_test_Math1.5B"}
 
 echo "Running with hyperparameters:"
 echo "Actor LR: $ACTOR_LR"
@@ -27,8 +27,6 @@ echo "GPU Memory Utilization: $GPU_MEMORY_UTIL"
 echo "Test Frequency: $TEST_FREQ"
 echo "Number of GPUs: $N_GPUS"
 echo "Experiment Name: $EXPERIMENT_NAME"
-
-export CUDA_VISIBLE_DEVICES="4,5"
 
 PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  data.train_files=$HOME/project/verl/data/math-base/train.parquet \
@@ -54,7 +52,7 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  critic.ppo_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE_PER_GPU \
  algorithm.kl_ctrl.kl_coef=$KL_COEF \
  trainer.logger=['console'] \
- +trainer.val_before_train=True \
+ +trainer.val_before_train=True\
  trainer.default_hdfs_dir=null \
  trainer.n_gpus_per_node=$N_GPUS \
  trainer.nnodes=1 \

@@ -448,6 +448,19 @@ class RayPPOTrainer(object):
         assert self.val_dataset.truncation == self.config.data.get(
             'truncation', 'error'
         ), f'dataset truncation {self.val_dataset.truncation} must be the same as config {self.config.data.get("truncation", "error")}'
+        
+        # RZ: Ensure validation dataset size is a multiple of the number of GPUs.
+        # RZ: Ootherwise, we will meet some errors when computing the values of prompts.
+        n_gpus = self.resource_pool_manager.get_n_gpus()
+        original_val_size = len(self.val_dataset)
+        if original_val_size % n_gpus != 0:
+            # Calculate how many examples to keep to make it divisible by n_gpus
+            keep_size = original_val_size - (original_val_size % n_gpus)
+            print(f"Reducing validation dataset from {original_val_size} to {keep_size} examples to make it divisible by {n_gpus} GPUs")
+            # Create a smaller version of the dataset
+            indices = list(range(keep_size))
+            self.val_dataset = torch.utils.data.Subset(self.val_dataset, indices)
+        
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
@@ -515,9 +528,12 @@ class RayPPOTrainer(object):
         sample_scores = []
 
         for test_data in self.val_dataloader:
+            # RZ: test_data is a dict.
+            # RZ: keys = dict_keys(['input_ids', 'attention_mask', 'position_ids', 'level', 'type', 'data_source', 'ability', 'reward_model', 'extra_info', 'raw_prompt_ids', 'index'])
 
-            breakpoint()
-            test_batch = DataProto.from_single_dict(test_data)
+            test_batch = DataProto.from_single_dict(test_data) 
+            # RZ: A Proto object. use test_batch.batch to access the data.
+            # RZ: All validation data is in one batch.
 
             # repeat test batch
             test_batch = test_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n,
@@ -554,7 +570,6 @@ class RayPPOTrainer(object):
 
             # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
-            breakpoint()
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
 
             # unpad
@@ -567,6 +582,16 @@ class RayPPOTrainer(object):
             sample_outputs.extend(output_texts)
 
             test_batch = test_batch.union(test_output_gen_batch)
+            
+            # RZ: Compute the value of prompts.
+            if self.config.actor_rollout_ref.rollout.compute_prompts_values:
+                pprint('Compute the value of prompts.')
+                values = self.critic_wg.compute_prompts_values(test_batch)
+                breakpoint()
+                # TODO: RZ: Compute the value of prompts.
+                pass
+            else:
+                pprint('Do not compute the values of prompts.')
 
             # evaluate using reward_function
             reward_tensor = self.val_reward_fn(test_batch)
@@ -577,7 +602,6 @@ class RayPPOTrainer(object):
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
-            breakpoint()
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
@@ -839,6 +863,10 @@ class RayPPOTrainer(object):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                         # RZ: A syntax sugar to encapsulate the 3 processes into a single call from the controller process.
                         # RZ: 1. Split the data into data parallel sizes; 2. Dispatch the corresponding data into each worker 3. Collect and concatenate the data when the computation finishes
+
+                        # RZ: gen_batch_output: DataProto.
+                        # RZ: gen_batch_output.batch: TensorDict.
+                        # RZ: gen_batch_output.batch.keys() = ['input_ids', 'attention_mask', 'position_ids', 'prompts', 'responses']
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer('gen_max', timing_raw):

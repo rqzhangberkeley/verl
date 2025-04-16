@@ -47,6 +47,30 @@ class DataParallelPPOCritic(BasePPOCritic):
 
         self.ulysses_sequence_parallel_size = self.config.get('ulysses_sequence_parallel_size', 1)
 
+    def _forward_micro_batch_prompts(self, micro_batch):
+        prompt_length = micro_batch['prompts'].size(-1)
+        multi_modal_inputs = {}
+        
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            input_ids = micro_batch['input_ids']
+            batch, seqlen = input_ids.shape
+            attention_mask = micro_batch['attention_mask']
+            position_ids = micro_batch['position_ids']
+            if position_ids.dim() == 3:  # qwen2vl mrope
+                position_ids = position_ids.transpose(0, 1)
+
+            if self.use_remove_padding: # RZ: Whether to use remove padding. By default, it is False.
+                raise NotImplementedError("Use_remove_padding is not supported yet.")
+            else:
+                output = self.critic_module(input_ids=input_ids,
+                                            attention_mask=attention_mask,
+                                            position_ids=position_ids,
+                                            **multi_modal_inputs,
+                                            use_cache=False)  # prevent model thinks we are generating
+                values = output.logits
+                values = values[:, -prompt_length - 1:-1].squeeze(-1)
+            return values
+
     def _forward_micro_batch(self, micro_batch):
         response_length = micro_batch['responses'].size(-1)
         multi_modal_inputs = {}
@@ -121,13 +145,46 @@ class DataParallelPPOCritic(BasePPOCritic):
             grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_module.parameters(), max_norm=self.config.grad_clip)
         self.critic_optimizer.step()
         return grad_norm
+    
+    def compute_prompts_values(self, data: DataProto) -> torch.Tensor:
+        self.critic_module.eval()
+        micro_batch_size = data.meta_info['micro_batch_size']
+        select_keys = ['prompts', 'input_ids', 'attention_mask', 'position_ids']
+        batch = data.select(batch_keys=select_keys).batch
+        use_dynamic_bsz = data.meta_info['use_dynamic_bsz']
+        has_multi_modal_inputs = 'multi_modal_inputs' in data.non_tensor_batch.keys()
+
+        if has_multi_modal_inputs:
+            raise NotImplementedError("Multi-modal inputs are not supported yet.")
+        elif use_dynamic_bsz:
+            raise NotImplementedError("Dynamic batch size is not supported yet.")
+        else:
+            micro_batches = batch.split(micro_batch_size)
+
+        values_lst = []
+        for micro_batch in micro_batches:
+            if isinstance(micro_batch, DataProto):
+                micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+
+            with torch.no_grad():
+                values = self._forward_micro_batch_prompts(micro_batch)
+            values_lst.append(values)
+        values = torch.concat(values_lst, dim=0)
+        prompts = data.batch['prompts']
+        attention_mask = data.batch['attention_mask']
+        prompt_length = prompts.size(1)
+        values = values * attention_mask[:, -prompt_length - 1:-1]
+
+        if use_dynamic_bsz:
+            raise NotImplementedError("Dynamic batch size is not supported yet.")
+        return values
 
     def compute_values(self, data: DataProto) -> torch.Tensor:
         self.critic_module.eval()
         micro_batch_size = data.meta_info['micro_batch_size']
         select_keys = ['responses', 'input_ids', 'attention_mask', 'position_ids']
-        batch = data.select(batch_keys=select_keys).batch
-        use_dynamic_bsz = data.meta_info['use_dynamic_bsz']
+        batch = data.select(batch_keys=select_keys).batch # RZ： A tensor_dict. size = PPO_MINI_BATCH_SIZE * seq length.
+        use_dynamic_bsz = data.meta_info['use_dynamic_bsz'] # RZ: Whether to use dynamic batch size. By default, it is False.
         has_multi_modal_inputs = 'multi_modal_inputs' in data.non_tensor_batch.keys()
 
         if has_multi_modal_inputs:
@@ -140,6 +197,7 @@ class DataParallelPPOCritic(BasePPOCritic):
             micro_batches, indices = rearrange_micro_batches(batch=batch, max_token_len=max_token_len)
         else:
             micro_batches = batch.split(micro_batch_size)
+            # RZ: A tuple. Length = PPO_MINI_BATCH_SIZE / PPO_MICRO_BATCH_SIZE_PER_GPU.
 
         values_lst = []
         for micro_batch in micro_batches:
@@ -160,8 +218,7 @@ class DataParallelPPOCritic(BasePPOCritic):
             assert len(indices) == values.size(0), f"{len(indices)} vs. {values.size()}"
             revert_indices = torch.tensor(get_reverse_idx(indices), dtype=torch.long)
             values = values[revert_indices]
-
-        return values
+        return values # RZ: A tensor. size = PPO_MINI_BATCH_SIZE * seq length.
 
     def update_critic(self, data: DataProto):
         # make sure we are in training mode

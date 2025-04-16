@@ -819,7 +819,32 @@ class CriticWorker(Worker):
         # perform forward computation
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
-            values = self.critic.compute_values(data=data)
+            values = self.critic.compute_values(data=data) # RZ: call compute_values in verl/verl/workers/critic/dp_critic.py
+            output = DataProto.from_dict(tensors={'values': values})
+            output = self.ulysses_sharding_manager.postprocess_data(data=output)
+
+        output = output.to('cpu')
+        if self._is_offload_param:
+            offload_fsdp_model_to_cpu(self.critic_module)
+        return output
+
+    # RZ: Via this function, we register the compute_prompts_values function in verl/verl/workers/critic/dp_critic.py
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    def compute_prompts_values(self, data: DataProto):
+        # Support all hardwares
+        data = data.to(torch.cuda.current_device())
+
+        if self._is_offload_param:
+            load_fsdp_model_to_gpu(self.critic_module)
+        micro_batch_size = self.config.forward_micro_batch_size_per_gpu
+        data.meta_info['micro_batch_size'] = micro_batch_size
+        data.meta_info['max_token_len'] = self.config.forward_max_token_len_per_gpu
+        data.meta_info['use_dynamic_bsz'] = self.config.use_dynamic_bsz
+        # perform forward computation
+        with self.ulysses_sharding_manager:
+            data = self.ulysses_sharding_manager.preprocess_data(data=data)
+            values = self.critic.compute_prompts_values(data=data) 
+            # RZ: Call compute_prompts_values in verl/verl/workers/critic/dp_critic.py
             output = DataProto.from_dict(tensors={'values': values})
             output = self.ulysses_sharding_manager.postprocess_data(data=output)
 

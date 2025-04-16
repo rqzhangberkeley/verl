@@ -95,6 +95,7 @@ actor_rollout_ref:
     # number of responses (i.e. num sample times)
     n: 1 # > 1 for grpo ### RZ: the number of completions per prompt. Usuall = 1 for PPO. The real batch size after generation is n * train_batch_size.
     n_validation: 1 # RZ: the number of completions per prompt for validation. If we want to compute the value of prompts in the validation time, we want probably a large number. We only use this hyperparameters when critic.estimate_prompts_value is True.
+    compute_prompts_values: True # RZ: whether to compute the value of prompts in the validation time.
     val_kwargs:
       # sampling parameters for validation
       top_k: -1 # 0 for hf rollout, -1 for vllm rollout
@@ -197,3 +198,19 @@ trainer:
 
 curriculum:
   use_curriculum_learning: False
+  train_batch_size_pool: 3072
+  subsample_criterion: square-inverse
+  p_thres: 0.5
+  warmup_steps: 2
+
+
+#########################
+# Annotation ############
+# 1. actor_rollout_ref.rollout.n_validation: the number of completions per prompt for validation.
+# 2. actor_rollout_ref.rollout.compute_prompts_value: whether to compute the value of prompts in the validation time.
+# 3. curriculum.use_curriculum_learning: whether to use curriculum learning.
+# 4. curriculum.train_batch_size_pool: the pool size for selecting the batch for training. We use this hyperparameter only if curriculum.use_curriculum_learning is True.
+# 5. curriculum.subsample_criterion: How shall we sample the batch from the pool. We sample P_i \prpto f(|p - p_thres|). 'square-inverse' means f(x) = 1 / x^2.
+# 6. curriculum.p_thres: The threshold for the pool. We sample P_i \prpto f(|p - p_thres|).
+# 7. curriculum.warmup_steps: The number of steps for the warmup. In these steps, we use the data_batch_size as the training batch size.
+#########################
