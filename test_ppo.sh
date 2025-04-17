@@ -30,7 +30,7 @@ echo "Experiment Name: $EXPERIMENT_NAME"
 
 PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  data.train_files=$HOME/project/verl/data/math-base/train.parquet \
- data.val_files=$HOME/project/verl/data/math-base/test.parquet \
+ data.val_files=$HOME/project/verl/data/math500-base-subset50/test.parquet \
  data.train_batch_size=$TRAIN_BATCH_SIZE \
  data.max_prompt_length=512 \
  data.max_response_length=$MAX_RESPONSE_LENGTH \

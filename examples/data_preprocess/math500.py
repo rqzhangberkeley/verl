@@ -30,7 +30,7 @@ def extract_solution(solution_str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='~/data/MATH500')
+    parser.add_argument('--local_dir', default='./data/math500-base-subset50')
     parser.add_argument('--model_type', default='base')
     parser.add_argument('--hdfs_dir', default=None)
 
@@ -86,7 +86,9 @@ if __name__ == '__main__':
         return process_fn
 
     model_type = args.model_type
-    test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
+
+    # RZ: only use 50 examples for testing
+    test_dataset = test_dataset.select(range(50)).map(function=make_map_fn('test'), with_indices=True)
 
     local_dir = args.local_dir
     hdfs_dir = args.hdfs_dir

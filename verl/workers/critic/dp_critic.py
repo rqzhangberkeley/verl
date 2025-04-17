@@ -68,7 +68,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                                             **multi_modal_inputs,
                                             use_cache=False)  # prevent model thinks we are generating
                 values = output.logits
-                values = values[:, -prompt_length - 1:-1].squeeze(-1)
+                values = values.squeeze(-1) # shape = (PPO_MINI_BATCH_SIZE * prompt length)
             return values
 
     def _forward_micro_batch(self, micro_batch):
@@ -173,7 +173,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         prompts = data.batch['prompts']
         attention_mask = data.batch['attention_mask']
         prompt_length = prompts.size(1)
-        values = values * attention_mask[:, -prompt_length - 1:-1]
+        values = values * attention_mask # shape = (PPO_MINI_BATCH_SIZE * prompt length)
 
         if use_dynamic_bsz:
             raise NotImplementedError("Dynamic batch size is not supported yet.")

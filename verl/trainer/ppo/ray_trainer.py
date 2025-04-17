@@ -526,6 +526,9 @@ class RayPPOTrainer(object):
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
+        
+        # RZ: Dictionary to collect prompt-wise statistics
+        prompt_stats = {}
 
         for test_data in self.val_dataloader:
             # RZ: test_data is a dict.
@@ -534,30 +537,34 @@ class RayPPOTrainer(object):
             test_batch = DataProto.from_single_dict(test_data) 
             # RZ: A Proto object. use test_batch.batch to access the data.
             # RZ: All validation data is in one batch.
+            
+            ######################### ADDED: RZ: #################################
+            # RZ: Create a mapping from original prompt index to list of repeated indices
+            # RZ: This will be used to map back generated responses to their prompts
+            original_batch_size = len(test_batch)
+            repeat_times = self.config.actor_rollout_ref.rollout.val_kwargs.n
+            prompt_to_samples = {i: list(range(i*repeat_times, (i+1)*repeat_times)) for i in range(original_batch_size)}
+            ######################### ADDED: RZ: #################################
 
             # repeat test batch
-            test_batch = test_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n,
-                                           interleave=True)
+            test_batch = test_batch.repeat(repeat_times=repeat_times, interleave=True)
+            # RZ: test_batch.batch['input_ids'].shape = (original_batch_size * repeat_times, max_prompt_length)
 
             # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
                 return {}
 
-            # Store original inputs
-            input_ids = test_batch.batch['input_ids']
-            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-            sample_inputs.extend(input_texts)
-
-            if 'multi_modal_inputs' in test_batch.non_tensor_batch.keys():
-                test_gen_batch = test_batch.pop(
-                    batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
-                )
-            else:
-                test_gen_batch = test_batch.pop(
-                    batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids'],
-                )
+            # RZ: We do not use multi-modal inputs for validation.
+            # if 'multi_modal_inputs' in test_batch.non_tensor_batch.keys():
+            #     test_gen_batch = test_batch.pop(
+            #         batch_keys=['input_ids', 'attention_mask', 'position_ids'],
+            #         non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
+            #     )
+            # else:
+            test_gen_batch = test_batch.pop(
+                batch_keys=['input_ids', 'attention_mask', 'position_ids'],
+                non_tensor_batch_keys=['raw_prompt_ids'],
+            )
 
             test_gen_batch.meta_info = {
                 'eos_token_id': self.tokenizer.eos_token_id,
@@ -568,13 +575,11 @@ class RayPPOTrainer(object):
             }
             print(f'test_gen_batch meta info: {test_gen_batch.meta_info}')
 
-            # pad to be divisible by dp_size
+            # RZ: pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
-
-            # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
-            print('validation generation end')
+            print('validation generation end') # RZ: unpad
 
             # Store generated outputs
             output_ids = test_output_gen_batch.batch['responses']
@@ -583,18 +588,70 @@ class RayPPOTrainer(object):
 
             test_batch = test_batch.union(test_output_gen_batch)
 
+            ######################### ADDED: RZ: #################################
             # RZ: Compute the value of prompts.
             if self.config.actor_rollout_ref.rollout.compute_prompts_values:
-                pprint('Compute the value of prompts.')
-                values = self.critic_wg.compute_prompts_values(test_batch) # RZ: shape = (batch_size, seq_len)
-                breakpoint()
-                # TODO: RZ: We already have the tesor-type values. How can we use them to compute the value of prompts?
-                # TODO: RZ: Log the values of prompts.
-                # TODO; RZ: For those prompts that have high/low pass rate, we can compute the value of prompts and see the accuracy.
-                # TODO; RZ: Handle multiple completions per prompt.
-                pass
+                print('Computing the value of prompts.')
+                
+                # Using test_batch after union with test_output_gen_batch to get prompt data
+                # Create a batch for value computation - using 'prompts' instead of original inputs
+                if 'prompts' in test_batch.batch:
+
+                    # RZ: Extract unique prompts (first instance of each repeated prompt)
+                    unique_prompts_indices = [indices[0] for indices in prompt_to_samples.values()]
+                    prompt_ids = test_batch.batch['prompts'][unique_prompts_indices]
+
+                    # RZ: Create attention mask for the prompts
+                    prompt_attention_mask = torch.ones_like(prompt_ids, dtype=torch.int64)
+                    prompt_attention_mask[prompt_ids == self.tokenizer.pad_token_id] = 0
+
+                    # RZ: Create position ids for the prompts
+                    prompt_length = prompt_ids.shape[1]
+                    prompt_position_ids = test_batch.batch['position_ids'][unique_prompts_indices, :prompt_length]
+                 
+                    prompt_value_batch = DataProto.from_dict(
+                        tensors={
+                            'input_ids': prompt_ids,
+                            'attention_mask': prompt_attention_mask,
+                            'position_ids': prompt_position_ids,
+                            'prompts': prompt_ids,
+                        },
+                        meta_info=test_batch.meta_info
+                    )
+                else:
+                    # Fall back to original_prompt_input_ids if 'prompts' not available
+                    raise ValueError("'prompts' not available in test_batch")
+                
+                # RZ: Compute prompt values (only once per prompt)
+                prompt_value_batch_padded, prompt_pad_size = pad_dataproto_to_divisor(
+                    prompt_value_batch, 
+                    self.critic_wg.world_size
+                )
+                prompt_values_padded = self.critic_wg.compute_prompts_values(prompt_value_batch_padded)
+                prompt_values = unpad_dataproto(prompt_values_padded, pad_size=prompt_pad_size)
+                token_values = prompt_values.batch['values']  # shape = (original_batch_size, prompt_length)
+                
+                # Compute prompt values using two methods:
+                # 1. Average over all tokens in the prompt
+                # 2. Value at the last token of each prompt. Since the prompts are left padded, the last token of each prompt is just the last index of every row in the batch.
+                prompt_masks = prompt_value_batch.batch['attention_mask']
+                
+                # Calculate average value across all tokens for each prompt
+                prompt_value_avg = torch.sum(token_values * prompt_masks, dim=1) / prompt_masks.sum(dim=1)
+                
+                # Get value at the last token of each prompt
+                prompt_value_last = token_values[:, -1]
+                
+                # Store these values for later analysis
+                prompt_value_avg = prompt_value_avg.to(torch.float32).cpu().numpy()
+                prompt_value_last = prompt_value_last.to(torch.float32).cpu().numpy()
+                
+                print(f"Prompt value stats - Avg: {prompt_value_avg.mean():.4f}, Last: {prompt_value_last.mean():.4f}")
             else:
-                pprint('Do not compute the values of prompts.')
+                print('Not computing the values of prompts.')
+                prompt_value_avg = None
+                prompt_value_last = None
+            ######################### ADDED: RZ: #################################
 
             # evaluate using reward_function
             reward_tensor = self.val_reward_fn(test_batch)
@@ -605,6 +662,33 @@ class RayPPOTrainer(object):
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
+            
+            ######################### ADDED: RZ: #################################
+            # RZ: Calculate pass rates and other metrics for each prompt
+            # A prompt "passes" if the reward is positive (or above some threshold)
+            # For simplicity, we'll consider a sample successful if its total reward is > 0
+            is_success = reward_tensor.sum(-1).cpu() > 0
+            
+            # ADDED: RZ: Collect results by prompt
+            for prompt_idx, sample_indices in prompt_to_samples.items():
+                # Get all results for this prompt
+                prompt_results = is_success[sample_indices].tolist()
+                prompt_rewards = reward_tensor.sum(-1).cpu()[sample_indices].tolist()
+                
+                # Calculate pass rate for this prompt
+                pass_rate = sum(prompt_results) / len(prompt_results)
+                
+                prompt_stats[prompt_idx] = {
+                    'pass_rate': pass_rate,
+                    'results': prompt_results,
+                    'rewards': prompt_rewards,
+                }
+                
+                # Add prompt values if computed
+                if prompt_value_avg is not None:
+                    prompt_stats[prompt_idx]['value_avg'] = prompt_value_avg[prompt_idx]
+                    prompt_stats[prompt_idx]['value_last'] = prompt_value_last[prompt_idx]
+            ######################### ADDED: RZ: #################################
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
@@ -622,6 +706,74 @@ class RayPPOTrainer(object):
         metric_dict = {}
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val/test_score/{data_source}'] = np.mean(rewards)
+            
+        ######################### ADDED: RZ: #################################
+        # ADDED: RZ: Calculate aggregated prompt metrics
+        if prompt_stats:
+            pass_rates = [stats['pass_rate'] for stats in prompt_stats.values()]
+            
+            # Calculate pass rate statistics
+            avg_pass_rate = np.mean(pass_rates)
+            median_pass_rate = np.median(pass_rates)
+            
+            # Calculate percentages of all-correct, all-incorrect, and other thresholds
+            all_correct_pct = sum(1 for rate in pass_rates if rate == 1.0) / len(pass_rates)
+            all_incorrect_pct = sum(1 for rate in pass_rates if rate == 0.0) / len(pass_rates)
+            low_pass_pct = sum(1 for rate in pass_rates if rate < 0.2) / len(pass_rates)
+            high_pass_pct = sum(1 for rate in pass_rates if rate > 0.8) / len(pass_rates)
+            
+            # Add metrics to the dictionary
+            metric_dict['val/pass_rate/avg'] = avg_pass_rate
+            metric_dict['val/pass_rate/median'] = median_pass_rate
+            metric_dict['val/pass_rate/all_correct_pct'] = all_correct_pct
+            metric_dict['val/pass_rate/all_incorrect_pct'] = all_incorrect_pct
+            metric_dict['val/pass_rate/low_pass_pct'] = low_pass_pct
+            metric_dict['val/pass_rate/high_pass_pct'] = high_pass_pct
+            
+            # Add prompt value metrics if available
+            if prompt_value_avg is not None:
+                avg_values = [stats.get('value_avg') for stats in prompt_stats.values()]
+                last_values = [stats.get('value_last') for stats in prompt_stats.values()]
+                
+                metric_dict['val/prompt_value/avg'] = np.mean(avg_values)
+                metric_dict['val/prompt_value/last'] = np.mean(last_values)
+                
+                # Correlate pass rates with values to see if values are predictive
+                value_avg_correlation = np.corrcoef(pass_rates, avg_values)[0, 1]
+                value_last_correlation = np.corrcoef(pass_rates, last_values)[0, 1]
+                
+                metric_dict['val/prompt_value/avg_correlation_with_pass'] = value_avg_correlation
+                metric_dict['val/prompt_value/last_correlation_with_pass'] = value_last_correlation
+                
+                # Log values for prompts with different pass rates
+                # For prompts with pass rate = 100%
+                perfect_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 1.0]
+                perfect_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 1.0]
+                
+                metric_dict['val/prompt_value/perfect_prompts_avg'] = np.mean(perfect_prompts_avg_values) if perfect_prompts_avg_values else -1
+                metric_dict['val/prompt_value/perfect_prompts_last'] = np.mean(perfect_prompts_last_values) if perfect_prompts_last_values else -1
+                
+                # For prompts with pass rate = 0%
+                failed_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 0.0]
+                failed_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 0.0]
+                
+                metric_dict['val/prompt_value/failed_prompts_avg'] = np.mean(failed_prompts_avg_values) if failed_prompts_avg_values else -1
+                metric_dict['val/prompt_value/failed_prompts_last'] = np.mean(failed_prompts_last_values) if failed_prompts_last_values else -1
+                
+                # For prompts with pass rate > 80%
+                high_pass_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] > 0.8]
+                high_pass_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] > 0.8]
+                
+                metric_dict['val/prompt_value/high_pass_prompts_avg'] = np.mean(high_pass_prompts_avg_values) if high_pass_prompts_avg_values else -1
+                metric_dict['val/prompt_value/high_pass_prompts_last'] = np.mean(high_pass_prompts_last_values) if high_pass_prompts_last_values else -1
+                
+                # For prompts with pass rate < 20%
+                low_pass_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] < 0.2]
+                low_pass_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] < 0.2]
+                
+                metric_dict['val/prompt_value/low_pass_prompts_avg'] = np.mean(low_pass_prompts_avg_values) if low_pass_prompts_avg_values else -1
+                metric_dict['val/prompt_value/low_pass_prompts_last'] = np.mean(low_pass_prompts_last_values) if low_pass_prompts_last_values else -1
+        ######################### ADDED: RZ: #################################
 
         return metric_dict
 
