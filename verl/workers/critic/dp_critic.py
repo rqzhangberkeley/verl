@@ -74,10 +74,10 @@ class DataParallelPPOCritic(BasePPOCritic):
     def _forward_micro_batch(self, micro_batch):
         response_length = micro_batch['responses'].size(-1)
         multi_modal_inputs = {}
-        if 'multi_modal_inputs' in micro_batch:
-            for key in micro_batch['multi_modal_inputs'][0].keys():
-                multi_modal_inputs[key] = torch.cat([inputs[key] for inputs in micro_batch['multi_modal_inputs']],
-                                                    dim=0)
+        # if 'multi_modal_inputs' in micro_batch:
+        #     for key in micro_batch['multi_modal_inputs'][0].keys():
+        #         multi_modal_inputs[key] = torch.cat([inputs[key] for inputs in micro_batch['multi_modal_inputs']],
+        #                                             dim=0)
 
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             input_ids = micro_batch['input_ids']

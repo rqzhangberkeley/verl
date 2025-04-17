@@ -4,20 +4,23 @@
 ACTOR_LR=${1:-1e-6}
 CRITIC_LR=${2:-1e-5}
 KL_COEF=${3:-0.001}
-TRAIN_BATCH_SIZE=${4:-1024}
-PPO_MINI_BATCH_SIZE=${5:-256}
-PPO_MICRO_BATCH_SIZE_PER_GPU=${6:-32}
-TOTAL_EPOCHS=${7:-10}
-MAX_RESPONSE_LENGTH=${8:-1024}
-GPU_MEMORY_UTIL=${9:-0.7}
-TEST_FREQ=${10:-10}
-N_GPUS=${11:-4}
-EXPERIMENT_NAME=${12:-"ppo_test_Math1.5B"}
+NUM_GENERATIONS_VALIDATION=${4:-32}
+TRAIN_BATCH_SIZE=${5:-1024}
+PPO_MINI_BATCH_SIZE=${6:-256}
+PPO_MICRO_BATCH_SIZE_PER_GPU=${7:-32}
+TOTAL_EPOCHS=${8:-10}
+MAX_RESPONSE_LENGTH=${9:-1024}
+GPU_MEMORY_UTIL=${10:-0.7}
+TEST_FREQ=${11:-10}
+N_GPUS=${12:-4}
+COMPUTE_PROMPTS_VALUES=${13:-True}
+EXPERIMENT_NAME=${14:-"ppo_test_Math1.5B"}
 
 echo "Running with hyperparameters:"
 echo "Actor LR: $ACTOR_LR"
 echo "Critic LR: $CRITIC_LR"
 echo "KL Coefficient: $KL_COEF"
+echo "Number of Generations Validation: $NUM_GENERATIONS_VALIDATION"
 echo "Train Batch Size: $TRAIN_BATCH_SIZE"
 echo "PPO Mini Batch Size: $PPO_MINI_BATCH_SIZE"
 echo "PPO Micro Batch Size: $PPO_MICRO_BATCH_SIZE_PER_GPU"
@@ -26,6 +29,7 @@ echo "Max Response Length: $MAX_RESPONSE_LENGTH"
 echo "GPU Memory Utilization: $GPU_MEMORY_UTIL"
 echo "Test Frequency: $TEST_FREQ"
 echo "Number of GPUs: $N_GPUS"
+echo "Compute Prompts Values: $COMPUTE_PROMPTS_VALUES"
 echo "Experiment Name: $EXPERIMENT_NAME"
 
 PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
@@ -46,12 +50,15 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
  actor_rollout_ref.rollout.name=vllm \
  actor_rollout_ref.rollout.gpu_memory_utilization=$GPU_MEMORY_UTIL \
+ actor_rollout_ref.rollout.val_kwargs.n=$NUM_GENERATIONS_VALIDATION \
+ actor_rollout_ref.rollout.compute_prompts_values=$COMPUTE_PROMPTS_VALUES \
  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE_PER_GPU \
  critic.optim.lr=$CRITIC_LR \
  critic.model.path=Qwen/Qwen2.5-1.5B \
  critic.ppo_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE_PER_GPU \
  algorithm.kl_ctrl.kl_coef=$KL_COEF \
- trainer.logger=['console'] \
+ algorithm.use_doctor_grpo=True \
+ trainer.logger=['console','wandb'] \
  +trainer.val_before_train=True\
  trainer.default_hdfs_dir=null \
  trainer.n_gpus_per_node=$N_GPUS \

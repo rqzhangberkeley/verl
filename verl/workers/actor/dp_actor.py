@@ -66,10 +66,10 @@ class DataParallelPPOActor(BasePPOActor):
         """
         response_length = micro_batch['responses'].size(-1)
         multi_modal_inputs = {}
-        if 'multi_modal_inputs' in micro_batch:
-            for key in micro_batch['multi_modal_inputs'][0].keys():
-                multi_modal_inputs[key] = torch.cat([inputs[key] for inputs in micro_batch['multi_modal_inputs']],
-                                                    dim=0)
+        # if 'multi_modal_inputs' in micro_batch:
+        #     for key in micro_batch['multi_modal_inputs'][0].keys():
+        #         multi_modal_inputs[key] = torch.cat([inputs[key] for inputs in micro_batch['multi_modal_inputs']],
+        #                                             dim=0)
 
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             input_ids = micro_batch['input_ids']
@@ -289,7 +289,9 @@ class DataParallelPPOActor(BasePPOActor):
                                                                                   log_prob=log_prob,
                                                                                   advantages=advantages,
                                                                                   eos_mask=response_mask,
-                                                                                  cliprange=clip_ratio)
+                                                                                  cliprange=clip_ratio,
+                                                                                  max_tokens=self.config.data.max_response_length,
+                                                                                  use_doctor_grpo=self.config.algorithm.use_doctor_grpo)
                     # compute entropy loss from entropy
                     entropy_loss = verl_F.masked_mean(entropy, response_mask)
 

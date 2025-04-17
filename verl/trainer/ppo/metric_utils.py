@@ -19,6 +19,7 @@ import torch
 from typing import Any, Dict, List
 import numpy as np
 from verl import DataProto
+import wandb
 
 
 def reduce_metrics(metrics: Dict[str, List[Any]]) -> Dict[str, Any]:
@@ -166,3 +167,73 @@ def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], n
         'perf/time_per_step': time,
         'perf/throughput': total_num_tokens / (time * n_gpus),
     }
+
+
+def compute_pass_rate_metrics(prompt_stats, prompt_value_avg=None):
+    """Compute pass rate metrics and create visualization for wandb logging.
+    
+    Args:
+        prompt_stats (dict): Dictionary containing prompt statistics with pass rates
+        prompt_value_avg (Optional[dict]): Dictionary containing prompt value averages
+        
+    Returns:
+        tuple: (metric_dict, wandb_plot) where metric_dict contains the metrics and wandb_plot is the bar plot
+    """
+    metric_dict = {}
+    pass_rates = [stats['pass_rate'] for stats in prompt_stats.values()]
+    
+    # Calculate basic pass rate statistics
+    metric_dict['val/pass_rate/avg'] = np.mean(pass_rates)
+    metric_dict['val/pass_rate/median'] = np.median(pass_rates)
+    
+    # Calculate percentages for different pass rate buckets
+    buckets = {
+        '0%': sum(1 for rate in pass_rates if rate == 0.0),
+        '0-20%': sum(1 for rate in pass_rates if 0.0 < rate < 0.2),
+        '20-40%': sum(1 for rate in pass_rates if 0.2 <= rate < 0.4),
+        '40-60%': sum(1 for rate in pass_rates if 0.4 <= rate <= 0.6),
+        '60-80%': sum(1 for rate in pass_rates if 0.6 < rate < 0.8),
+        '80-100%': sum(1 for rate in pass_rates if 0.8 <= rate < 1.0),
+        '100%': sum(1 for rate in pass_rates if rate == 1.0)
+    }
+    
+    total_prompts = len(pass_rates)
+    for bucket, count in buckets.items():
+        metric_dict[f'val/pass_rate/bucket_{bucket}'] = count / total_prompts
+    
+    # Create wandb bar plot
+    data = [[bucket, (count/total_prompts)*100] for bucket, count in buckets.items()]
+    table = wandb.Table(data=data, columns=['Pass Rate Bucket', 'Percentage of Prompts'])
+    wandb_plot = wandb.plot.bar(
+        table, 
+        'Pass Rate Bucket',
+        'Percentage of Prompts',
+        title='Distribution of Pass Rates'
+    )
+    
+    # If prompt values are provided, compute last token metrics for different pass rate ranges
+    if prompt_value_avg is not None:
+        last_values = [stats.get('value_last') for stats in prompt_stats.values()]
+        
+        # Compute metrics for different pass rate ranges using last token values only
+        ranges = [
+            (1.0, 1.0, 'perfect'),
+            (0.0, 0.0, 'failed'),
+            (0.8, 1.0, 'high_pass'),
+            (0.0, 0.2, 'low_pass'),
+            (0.4, 0.6, 'medium_pass')
+        ]
+        
+        for min_rate, max_rate, label in ranges:
+            values = [
+                stats.get('value_last') 
+                for stats in prompt_stats.values() 
+                if min_rate <= stats['pass_rate'] <= max_rate
+            ]
+            metric_dict[f'val/prompt_value/{label}_prompts_last'] = np.mean(values) if values else -1
+        
+        # Compute correlation between pass rates and last token values
+        value_last_correlation = np.corrcoef(pass_rates, last_values)[0, 1]
+        metric_dict['val/prompt_value/last_correlation_with_pass'] = value_last_correlation
+    
+    return metric_dict, wandb_plot

@@ -35,7 +35,7 @@ from verl.single_controller.base import Worker
 from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClassWithInitArgs
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
-from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics, compute_pass_rate_metrics
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
@@ -595,7 +595,7 @@ class RayPPOTrainer(object):
                 
                 # Using test_batch after union with test_output_gen_batch to get prompt data
                 # Create a batch for value computation - using 'prompts' instead of original inputs
-                if 'prompts' in test_batch.batch:
+                if 'prompts' in test_batch.batch.keys():
 
                     # RZ: Extract unique prompts (first instance of each repeated prompt)
                     unique_prompts_indices = [indices[0] for indices in prompt_to_samples.values()]
@@ -707,73 +707,16 @@ class RayPPOTrainer(object):
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val/test_score/{data_source}'] = np.mean(rewards)
             
-        ######################### ADDED: RZ: #################################
-        # ADDED: RZ: Calculate aggregated prompt metrics
+        # Calculate aggregated prompt metrics
         if prompt_stats:
-            pass_rates = [stats['pass_rate'] for stats in prompt_stats.values()]
+            # Use the new utility function to compute pass rate metrics and create visualization
+            prompt_metrics, pass_rate_plot = compute_pass_rate_metrics(prompt_stats, prompt_value_avg)
+            metric_dict.update(prompt_metrics)
             
-            # Calculate pass rate statistics
-            avg_pass_rate = np.mean(pass_rates)
-            median_pass_rate = np.median(pass_rates)
-            
-            # Calculate percentages of all-correct, all-incorrect, and other thresholds
-            all_correct_pct = sum(1 for rate in pass_rates if rate == 1.0) / len(pass_rates)
-            all_incorrect_pct = sum(1 for rate in pass_rates if rate == 0.0) / len(pass_rates)
-            low_pass_pct = sum(1 for rate in pass_rates if rate < 0.2) / len(pass_rates)
-            high_pass_pct = sum(1 for rate in pass_rates if rate > 0.8) / len(pass_rates)
-            
-            # Add metrics to the dictionary
-            metric_dict['val/pass_rate/avg'] = avg_pass_rate
-            metric_dict['val/pass_rate/median'] = median_pass_rate
-            metric_dict['val/pass_rate/all_correct_pct'] = all_correct_pct
-            metric_dict['val/pass_rate/all_incorrect_pct'] = all_incorrect_pct
-            metric_dict['val/pass_rate/low_pass_pct'] = low_pass_pct
-            metric_dict['val/pass_rate/high_pass_pct'] = high_pass_pct
-            
-            # Add prompt value metrics if available
-            if prompt_value_avg is not None:
-                avg_values = [stats.get('value_avg') for stats in prompt_stats.values()]
-                last_values = [stats.get('value_last') for stats in prompt_stats.values()]
-                
-                metric_dict['val/prompt_value/avg'] = np.mean(avg_values)
-                metric_dict['val/prompt_value/last'] = np.mean(last_values)
-                
-                # Correlate pass rates with values to see if values are predictive
-                value_avg_correlation = np.corrcoef(pass_rates, avg_values)[0, 1]
-                value_last_correlation = np.corrcoef(pass_rates, last_values)[0, 1]
-                
-                metric_dict['val/prompt_value/avg_correlation_with_pass'] = value_avg_correlation
-                metric_dict['val/prompt_value/last_correlation_with_pass'] = value_last_correlation
-                
-                # Log values for prompts with different pass rates
-                # For prompts with pass rate = 100%
-                perfect_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 1.0]
-                perfect_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 1.0]
-                
-                metric_dict['val/prompt_value/perfect_prompts_avg'] = np.mean(perfect_prompts_avg_values) if perfect_prompts_avg_values else -1
-                metric_dict['val/prompt_value/perfect_prompts_last'] = np.mean(perfect_prompts_last_values) if perfect_prompts_last_values else -1
-                
-                # For prompts with pass rate = 0%
-                failed_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 0.0]
-                failed_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] == 0.0]
-                
-                metric_dict['val/prompt_value/failed_prompts_avg'] = np.mean(failed_prompts_avg_values) if failed_prompts_avg_values else -1
-                metric_dict['val/prompt_value/failed_prompts_last'] = np.mean(failed_prompts_last_values) if failed_prompts_last_values else -1
-                
-                # For prompts with pass rate > 80%
-                high_pass_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] > 0.8]
-                high_pass_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] > 0.8]
-                
-                metric_dict['val/prompt_value/high_pass_prompts_avg'] = np.mean(high_pass_prompts_avg_values) if high_pass_prompts_avg_values else -1
-                metric_dict['val/prompt_value/high_pass_prompts_last'] = np.mean(high_pass_prompts_last_values) if high_pass_prompts_last_values else -1
-                
-                # For prompts with pass rate < 20%
-                low_pass_prompts_avg_values = [stats.get('value_avg') for idx, stats in prompt_stats.items() if stats['pass_rate'] < 0.2]
-                low_pass_prompts_last_values = [stats.get('value_last') for idx, stats in prompt_stats.items() if stats['pass_rate'] < 0.2]
-                
-                metric_dict['val/prompt_value/low_pass_prompts_avg'] = np.mean(low_pass_prompts_avg_values) if low_pass_prompts_avg_values else -1
-                metric_dict['val/prompt_value/low_pass_prompts_last'] = np.mean(low_pass_prompts_last_values) if low_pass_prompts_last_values else -1
-        ######################### ADDED: RZ: #################################
+            # Log the plot separately to wandb if wandb is being used
+            if self.config.trainer.logger == 'wandb':
+                import wandb
+                wandb.log({'val/pass_rate/distribution': pass_rate_plot}, step=self.global_steps)
 
         return metric_dict
 

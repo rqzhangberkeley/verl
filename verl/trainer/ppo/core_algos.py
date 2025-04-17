@@ -268,8 +268,9 @@ def compute_rewards(token_level_scores, old_log_prob, ref_log_prob, kl_ratio):
     kl = old_log_prob - ref_log_prob
     return token_level_scores - kl * kl_ratio
 
-
-def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange):
+# RZ: Added by RZ.
+def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange,
+                       max_tokens, use_doctor_grpo=False):
     """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1122
 
     Args:
@@ -283,7 +284,11 @@ def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange)
             shape: (bs, response_length)
         cliprange: (float)
             The clip range used in PPO. See https://arxiv.org/abs/1707.06347
-
+        max_tokens: `int`
+            The maximum number of tokens in the response.
+        use_doctor_grpo: `bool`
+            Whether to use the doctor.GRPO loss.
+            
     Returns:
         pg_loss: `a scalar torch.Tensor`
             policy gradient loss computed via PPO
@@ -298,8 +303,12 @@ def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange)
     pg_losses = -advantages * ratio
     pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
 
-    pg_loss = verl_F.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
-    pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
+    if use_doctor_grpo:
+        pg_loss = verl_F.masked_mean_doctor_grpo(pg_losses, eos_mask, max_tokens)
+        pg_clipfrac = verl_F.masked_mean_doctor_grpo(torch.gt(pg_losses2, pg_losses).float(), eos_mask, max_tokens)
+    else:
+        pg_loss = verl_F.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
+        pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
     return pg_loss, pg_clipfrac, ppo_kl
 
 
