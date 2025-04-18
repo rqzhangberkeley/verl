@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test_ppo_compute_prompts_values       # Job name
+#SBATCH --job-name=ppo_Math1.5B_tok1k_compute_prompts_values       # Job name
 #SBATCH --output=./logs/verl_ppo_%j.out  # Output file (%j will be replaced by job ID)
 #SBATCH --error=./logs/verl_ppo_%j.err   # Error file
 #SBATCH --nodes=1                 # Number of nodes
@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=256         # Number of CPU cores per task
 #SBATCH --gres=gpu:4              # Number of GPUs (4 GPUs per node)
 #SBATCH --mem-per-gpu=100G                # Memory per node
-#SBATCH --time=10:00:00           # Time limit (24 hours)
+#SBATCH --time=4:00:00           # Time limit (24 hours)
 #SBATCH --account=bdwy-dtai-gh    # Account name (adjust to your account)
 #SBATCH --mail-user=rqzhang@berkeley.edu  # Email address to receive notifications
 #SBATCH --mail-type=BEGIN,END,FAIL         # Send email at begin, end, or fail of job
@@ -29,12 +29,12 @@ TRAIN_BATCH_SIZE=${5:-1024}
 PPO_MINI_BATCH_SIZE=${6:-256}
 PPO_MICRO_BATCH_SIZE_PER_GPU=${7:-8}
 TOTAL_EPOCHS=${8:-10}
-MAX_RESPONSE_LENGTH=${9:-8192}
+MAX_RESPONSE_LENGTH=${9:-1024}
 GPU_MEMORY_UTIL=${10:-0.7}
 TEST_FREQ=${11:-3}
 N_GPUS=${12:-4}
 COMPUTE_PROMPTS_VALUES=${13:-True}
-EXPERIMENT_NAME=${14:-"ppo_test_Math1.5B_tok8k"}
+EXPERIMENT_NAME=${14:-"ppo_Math1.5B_tok1k_compute_prompts_values"}
 
 echo "Running with hyperparameters:"
 echo "Actor LR: $ACTOR_LR"
@@ -53,7 +53,7 @@ echo "Compute Prompts Values: $COMPUTE_PROMPTS_VALUES"
 echo "Experiment Name: $EXPERIMENT_NAME"
 
 PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
- data.train_files=./data/math-base/train.parquet \
+ data.train_files=./data/math500-base/train.parquet \
  data.val_files=./data/math500-base/test.parquet \
  data.train_batch_size=$TRAIN_BATCH_SIZE \
  data.max_prompt_length=512 \
@@ -69,7 +69,7 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE_PER_GPU \
  actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
  actor_rollout_ref.rollout.name=vllm \
- actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+ actor_rollout_ref.rollout.max_num_batched_tokens=9216 \
  actor_rollout_ref.rollout.gpu_memory_utilization=$GPU_MEMORY_UTIL \
  actor_rollout_ref.rollout.val_kwargs.n=$NUM_GENERATIONS_VALIDATION \
  actor_rollout_ref.rollout.compute_prompts_values=$COMPUTE_PROMPTS_VALUES \

@@ -40,6 +40,8 @@ actor_rollout_ref:
     ppo_epochs: 1
     shuffle: False
     ulysses_sequence_parallel_size: 1 # sp size
+    response_length: ${data.max_response_length}
+    use_doctor_grpo: False # RZ: Whether to use the doctor.GRPO loss.
     optim:
       lr: 1e-6
       lr_warmup_steps: -1 # Prioritized. Negative values mean delegating to lr_warmup_steps_ratio.
@@ -173,7 +175,6 @@ algorithm:
   kl_ctrl:
     type: fixed # RZ: fixed or adptive. See trainer/ppo/core_algos.py
     kl_coef: 0.001
-  use_doctor_grpo: False # RZ: Whether to use the doctor.GRPO loss.
 
 trainer:
   balance_batch: True # RZ: Balance the number of valid tokens on each dp rank. Pay close attention to the order of data inside the batch, especially for GRPO and RLOO.
