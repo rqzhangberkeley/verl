@@ -16,7 +16,7 @@ GPU_MEMORY_UTIL=${10:-0.7}
 TEST_FREQ=${11:-3}
 N_GPUS=${12:-4}
 COMPUTE_PROMPTS_VALUES=${13:-False}
-EXPERIMENT_NAME=${14:-"ppo_1.5B_MATH500_tok8k_val-only"}
+EXPERIMENT_NAME=${14:-"ppo_1.5B_DAPO500_tok8k_val-only"}
 
 echo "Running with hyperparameters:"
 echo "Actor LR: $ACTOR_LR"
@@ -35,8 +35,8 @@ echo "Compute Prompts Values: $COMPUTE_PROMPTS_VALUES"
 echo "Experiment Name: $EXPERIMENT_NAME"
 
 PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
- data.train_files=./data/DAPO-17k-base/train.parquet \
- data.val_files=./data/math500-base/test.parquet \
+ data.train_files=./data/math500-base/train.parquet \
+ data.val_files=./data/DAPO-17k-base-subset500/train.parquet \
  data.train_batch_size=$TRAIN_BATCH_SIZE \
  data.max_prompt_length=512 \
  data.max_response_length=$MAX_RESPONSE_LENGTH \

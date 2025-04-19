@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Preprocess the LIMO dataset to parquet format
+Preprocess the MATH500 dataset to parquet format
 """
 
 import os
