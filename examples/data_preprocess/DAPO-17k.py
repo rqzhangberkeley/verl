@@ -31,7 +31,7 @@ def extract_solution(solution_str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='./data/DAPO-17k')
+    parser.add_argument('--local_dir', default='./data/DAPO-17k-base')
     parser.add_argument('--model_type', default='base')
     parser.add_argument('--hdfs_dir', default=None)
 
