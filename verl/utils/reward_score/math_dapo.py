@@ -278,13 +278,8 @@ def compute_score(solution_str: str,
     solution_str = solution_str[-300:]  # The longest answer in MATH-500 has 159 characters
 
     # Verify the solution
-    correct, pred = verify(solution_str, ground_truth, strict_box_verify, pause_tokens_index)
+    correct, _ = verify(solution_str, ground_truth, strict_box_verify, pause_tokens_index)
 
     reward = 1.0 if correct else 0.0 # RZ: Changed from -1.0 to 0.0.
-    acc = correct
 
-    return {
-        "score": reward,
-        "acc": acc,
-        "pred": pred,
-    }
+    return reward

@@ -3,7 +3,7 @@
 verl is a flexible, efficient and production-ready RL training library for large language models (LLMs).
 verl is the open-source version of **[HybridFlow: A Flexible and Efficient RLHF Framework](https://arxiv.org/abs/2409.19256v2)** paper.
 
-
+## Setup
 #### PPO training flow with batch sizes:
 1. The system loads train_batch_size prompts from the dataset
 2. For each prompt, it generates rollout.n completions. The real effective batch size becomes train_batch_size * rollout.n, which represents the total number of completions in a training step.
@@ -27,9 +27,14 @@ To define a new reward function, just write compute_score() function in a new fi
 #### Use base model?
 We do not need to specially mute the chat template when using base model here since the RlHFDataset class will automatically add the chat template to the prompt (and it will return raw input text for base models). See Line 164 of verl/utils/dataset/rl_dataset.py. It derecctly calls PreTrainedTokenizer.apply_chat_template() method.
 
-#### Test run
-We tried to run PPO on Qwen2.5/0.5B-Instruct model on gsm8k for 15 epochs (based on the default hyperparameters). The validation accuracy rises from almost zero to about 52% after 15 epochs. The initial accuracy is lower than the standard result reported by Qwen (about 50) or the results from the offline evaluation codebase (45-47), because we are using a different prompt (by asking the model to put the answer after ####), but the model learns to follow this instruction quickly. According to verl's report, their trained 0.5B-Instruct model achieves 56.7 on validation set. We have not reproduced this result yet.
+## Our Experiments
 
-We also train 1.5B-Instruct model on Lighteval/MATH dataset via PPO for 3 epochs. For MATH dataset, we need math-verify package, which need to manually install antlr4-python3-runtime==4.9.3 (I am not sure why, but it seems the default installation pipeline does not work). We set the max_prompt_length to 1024 and we filter the overlong prompts. The training reward rises from around 48 to 59, but the validation accuracy rises from 55.6 to 56.1, which is not good. We train the model for longer epochs (15 epochs) and find the validation accuracy rises from 55.8 to 57 and then drops to 54. 
+#### Dataset: MATH500 and DAPO-17k
+We mainly use MATH500 and DAPO-17k to train and test the model.
 
-We also train a 7B-Instruct model on Lighteval/MATH with global batch size = 1024 (7 steps per epoch) for 3 epochs and it takes around 1 hour on 8 GPUs. 
+MATH dataset contains 12.5k data, ad 500 of them was sampled in MATH500 as a held-oout test set. We use the remaining 12k for training. See https://github.com/openai/prm800k/tree/main/prm800k/math_splits (this is different from the lighteval/MATH dataset where the training set and test set contain 7.5k and 5k, respectively).
+
+DAPO-17k contains 1.79 million data. We use it for training. In the DAPO's codebase, they use a different prompt than the one used in the original verl codebase. To avoid OOD, we use the original system prompt in the original verl codebase.
+
+#### Compute Prompts Values
+In validation time, we compute the value function of each prompt, evaluated at the last token of the prompt. Ideally, this value should be the pass rate of this prompt for the current model (if the value model is well trained). We also sample N=32 responses for each prompt and compute the pass rate.  We find although the prompts' values do not strictly match the pass rate, they have a positive correlation of around 0.6 after about 10-20 RL steps. 

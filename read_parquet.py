@@ -180,7 +180,6 @@ if __name__ == "__main__":
         print(f"Example row: {train_df.iloc[0]['ability']}")
         print(f"Example row: {train_df.iloc[0]['reward_model']}")
         print(f"Example row: {train_df.iloc[0]['extra_info']}")
-        import pdb; pdb.set_trace()
     except Exception as e:
         print(f"Error processing train data: {e}")
 
@@ -198,6 +197,6 @@ if __name__ == "__main__":
         print(f"Example row: {test_df.iloc[0]['extra_info']}")
     except Exception as e:
         print(f"Error processing test data: {e}")
-
+    import pdb; pdb.set_trace()
 
     

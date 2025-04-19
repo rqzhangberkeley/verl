@@ -401,6 +401,20 @@ class RayPPOTrainer(object):
             assert config.actor_rollout_ref.rollout.temperature > 0, \
                 "validation gen temperature should be greater than 0 when enabling do_sample"
 
+        # RZ: Added by RZ.
+        if config.curriculum.use_curriculum_learning:
+            pprint(f'We use curriculum learning.')
+            if config.curriculum.train_batch_size_pool % config.data.train_batch_size != 0:
+                raise ValueError(f'config.curriculum.train_batch_size_pool ({config.curriculum.train_batch_size_pool}) must be divisible by config.data.train_batch_size ({config.data.train_batch_size}).')
+            if config.curriculum.subsample_criterion not in ['square-inverse', 'inverse', 'exponential-linear']:
+                raise ValueError(f'config.curriculum.subsample_criterion ({config.curriculum.subsample_criterion}) must be one of the following: square-inverse, inverse, exponential-linear.')
+            if not isinstance(config.curriculum.p_thres, float) or config.curriculum.p_thres < 0 or config.curriculum.p_thres > 1:
+                raise ValueError(f'config.curriculum.p_thres ({config.curriculum.p_thres}) must be a float between 0 and 1.')
+            if not isinstance(config.curriculum.warmup_steps, int) or config.curriculum.warmup_steps < 0:
+                raise ValueError(f'config.curriculum.warmup_steps ({config.curriculum.warmup_steps}) must be a non-negative integer.')
+        else:
+            pprint(f'We do not use curriculum learning.')
+
         print("[validate_config] All configuration checks passed successfully!")
 
     def _create_dataloader(self):
@@ -890,6 +904,55 @@ class RayPPOTrainer(object):
                                                     prefix=logging_prefix)
         metrics.update(global_balance_stats)
 
+    def _compute_max_training_steps(self):
+        """Compute the maximum number of training steps based on curriculum learning settings."""
+        # Get dataloader size (number of batches per epoch)
+        dataloader_size = len(self.train_dataloader)
+        
+        if not self.config.curriculum.use_curriculum_learning:
+            # If not using curriculum learning, take max of total_training_steps and epochs * dataloader_size
+            if hasattr(self.config.trainer, 'total_training_steps') and self.config.trainer.total_training_steps:
+                total_steps = max(self.config.trainer.total_training_steps, 
+                         self.config.trainer.total_epochs * dataloader_size)
+            else:
+                total_steps = self.config.trainer.total_epochs * dataloader_size
+        else:
+            # With curriculum learning
+            warmup_steps = self.config.curriculum.warmup_steps
+            
+            # During warmup, batch_size = train_batch_size
+            # After warmup, batch_size = train_batch_size_pool
+            batch_size_multiplier = self.config.curriculum.train_batch_size_pool // self.config.data.train_batch_size
+            
+            if warmup_steps > 0:
+                remaining_steps = (self.config.trainer.total_epochs * dataloader_size - warmup_steps) // batch_size_multiplier
+                total_steps = warmup_steps + remaining_steps
+            else:
+                raise ValueError(f"warmup_steps must be a positive integer. Got {warmup_steps}.")
+            
+            if hasattr(self.config.trainer, 'total_training_steps') and self.config.trainer.total_training_steps:
+                total_steps = max(self.config.trainer.total_training_steps, total_steps)
+            else:
+                pass
+        pprint(f'######################## Total training steps: {total_steps} ########################')
+        return total_steps
+
+    # RZ: Implement the subsample function.
+    def _subsample_batch(self, batch: DataProto, target_batch_size: int, subsample_criterion: str):
+        """
+        Subsample the batch based on the curriculum learning settings.
+        Input: 
+            batch: DataProto.
+            target_batch_size: int.
+            subsample_criterion: str.
+                'random': Randomly subsample the batch.
+                'square-inverse': Subsample the batch based on the values of the prompts. The link
+        Output:
+            batch: DataProto.
+        """
+        # TODO: Implement the subsample function.
+        return batch
+    
     def fit(self):
         """
         The training loop of PPO.
@@ -905,6 +968,8 @@ class RayPPOTrainer(object):
                           config=OmegaConf.to_container(self.config, resolve=True))
 
         self.global_steps = 0
+        self.total_training_steps = self._compute_max_training_steps()
+        pprint(f'Total training steps: {self.total_training_steps}')
 
         # load checkpoint before doing anything
         self._load_checkpoint()
@@ -921,13 +986,56 @@ class RayPPOTrainer(object):
         # we start from step 1
         self.global_steps += 1
         last_val_metrics = None
-
-        for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+        
+        # TODO: if the train_dataloader needs updating, then we update it.
+        # TODO: The data_loader should have a batch size = self.config.curriculum.train_batch_size_pool.
+        # TODO: 
+        
+        # Initialize curriculum learning parameters
+        use_curriculum = self.config.curriculum.use_curriculum_learning
+        warmup_steps = self.config.curriculum.warmup_steps if use_curriculum else 0
+        batch_size_multiplier = (self.config.curriculum.train_batch_size_pool // self.config.data.train_batch_size) if use_curriculum else 1
+        
+        # Training loop
+        while self.global_steps <= self.total_training_steps:
+            # Create a single iterator for the epoch
+            dataloader_iterator = iter(self.train_dataloader)
+            
+            while True:  # Loop until StopIteration
+                if self.global_steps > self.total_training_steps:
+                    break
+                    
                 metrics = {}
                 timing_raw = {}
 
-                batch: DataProto = DataProto.from_single_dict(batch_dict)
+                # Get first batch
+                try:
+                    batch_dict = next(dataloader_iterator)
+                except StopIteration:
+                    # End of epoch, break inner loop to create new iterator
+                    break
+
+                # Handle curriculum learning batch size
+                if use_curriculum and self.global_steps > warmup_steps:
+                    # Collect multiple batches and merge them
+                    merged_batch = batch_dict
+                    for _ in range(batch_size_multiplier - 1):
+                        try:
+                            next_batch = next(dataloader_iterator)
+                            # Merge batches along the batch dimension
+                            for key in merged_batch:
+                                if isinstance(merged_batch[key], torch.Tensor):
+                                    merged_batch[key] = torch.cat([merged_batch[key], next_batch[key]], dim=0)
+                                elif isinstance(merged_batch[key], list):
+                                    merged_batch[key].extend(next_batch[key])
+                        except StopIteration:
+                            # If we run out of data, break and use what we have
+                            break
+                    batch: DataProto = DataProto.from_single_dict(merged_batch)
+                    # TODO: Compute values for the prompts of this batch.
+                    # TODO: Sample a batch from this batch.
+                else:
+                    batch: DataProto = DataProto.from_single_dict(batch_dict)
                 # RZ: A batch of prompts. Len(batch) = config.data.train_batch_size.
                 # It contains a batch (TensorDict):
                 # TensorDict(
@@ -939,19 +1047,12 @@ class RayPPOTrainer(object):
                 # device=None,
                 # is_shared=False)
 
-
                 # pop those keys for generation
-                if 'multi_modal_inputs' in batch.non_tensor_batch.keys():
-                    gen_batch = batch.pop(
-                        batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                        non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
-                    )
-                else:
-                    gen_batch = batch.pop(
-                        batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                        non_tensor_batch_keys=['raw_prompt_ids'],
-                    )
-                    # RZ: type = TensorDict. When this line is run, we no longer have any data in 'batch' and everything is in 'gen_batch'.
+                gen_batch = batch.pop(
+                    batch_keys=['input_ids', 'attention_mask', 'position_ids'],
+                    non_tensor_batch_keys=['raw_prompt_ids'],
+                )
+                # RZ: type = TensorDict. When this line is run, we no longer have any data in 'batch' and everything is in 'gen_batch'.
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
@@ -983,7 +1084,7 @@ class RayPPOTrainer(object):
                             del gen_baseline_batch, gen_baseline_output
 
                     batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
-                                                             dtype=object)
+                                                                 dtype=object)
                     # repeat to align with repeated responses in rollout
                     # RZ:  It repeats each prompt element n times so it matches with the structure of the generated responses.
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
@@ -1063,7 +1164,7 @@ class RayPPOTrainer(object):
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
                         (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0): # RZ: when it is ready for validation.
                         with _timer('testing', timing_raw):
-                            val_metrics: dict = self._validate()
+                            val_metrics = self._validate()
                             if is_last_step:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)

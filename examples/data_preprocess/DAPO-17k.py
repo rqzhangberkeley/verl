@@ -42,8 +42,7 @@ if __name__ == '__main__':
     dataset = datasets.load_dataset(data_source, trust_remote_code=True)
 
     train_dataset = dataset['train']
-
-    instruction_following = "Let's think step by step and output the final answer within \\boxed{}."
+    instruction_following = "Let's think step by step and output the final answer within \\boxed{}." 
 
     # add a row to each data item that represents a unique id
     def make_map_fn(split):
@@ -55,13 +54,17 @@ if __name__ == '__main__':
                 raise NotImplementedError("Instruct model is not supported for DAPO-17k")
             
             data_source = example.pop('data_source')
-            prompt = example.pop('prompt')
+            prompt = example.pop('prompt') # There are instructions in the prompt.
             ability = example.pop('ability')
             reward_model = example.pop('reward_model')
             extra_info = example.pop('extra_info')
+            prompt_text = prompt[0]['content']
+            prompt_text = prompt_text.replace('Solve the following math problem step by step. ', '')
+            prompt_text = prompt_text.replace('\n\nRemember to put your answer on its own line after "Answer:".', '')
+            prompt_text = prompt_text + ' ' + instruction_following
             data = {
                 "data_source": data_source,
-                "prompt": prompt[0]['content'], # the system prompt is different from the one in MATH dataset.
+                "prompt": prompt_text, # the system prompt is different from the one in MATH dataset.
                 "ability": ability,
                 "reward_model": reward_model,
                 "extra_info": extra_info

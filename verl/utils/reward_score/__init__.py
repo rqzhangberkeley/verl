@@ -18,7 +18,7 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
     if data_source == 'openai/gsm8k':
         from . import gsm8k
         res = gsm8k.compute_score(solution_str, ground_truth)
-    elif data_source in ['lighteval/MATH', 'DigitalLearningGmbH/MATH-lighteval','di-zhang-fdu/MATH500', 'MATH500']:
+    elif data_source in ['lighteval/MATH', 'DigitalLearningGmbH/MATH-lighteval','di-zhang-fdu/MATH500', 'MATH500', 'math_dapo']:
         # from . import math
         # res = math.compute_score(solution_str, ground_truth)
 
@@ -30,9 +30,9 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
     elif data_source.startswith("MATH##") or data_source.startswith("aime"):
         from . import math_verify
         res = math_verify.compute_score(solution_str, ground_truth)
-    elif data_source == 'math_dapo':
-        from . import math_dapo
-        res = math_dapo.compute_score(solution_str, ground_truth)
+    # elif data_source == 'math_dapo':
+    #     from . import math_dapo
+    #     res = math_dapo.compute_score(solution_str, ground_truth)
     # RZ: End edit.
 
     elif data_source in [

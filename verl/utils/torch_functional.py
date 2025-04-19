@@ -120,9 +120,9 @@ def masked_mean(values, mask, axis=None):
     return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
 
 # ADDED BY RUIQI
-def masked_mean_doctor_grpo(values, mask, max_tokens):
+def masked_mean_doctor_grpo(values, mask, max_tokens, axis=None):
     """Compute mean of tensor with a masked values. This was first proposed in the Doctor.GRPO paper. See https://arxiv.org/abs/2503.20783."""
-    return (values * mask).sum(axis=-1) / max_tokens
+    return (values * mask).sum(axis=axis) / max_tokens
 
 
 def masked_var(values, mask, unbiased=True):

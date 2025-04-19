@@ -6,7 +6,7 @@ wandb login 363018e9dc8339fae726d3b48a839f262c457194
 ACTOR_LR=${1:-1e-6}
 CRITIC_LR=${2:-1e-5}
 KL_COEF=${3:-0.001}
-NUM_GENERATIONS_VALIDATION=${4:-1}
+NUM_GENERATIONS_VALIDATION=${4:-32}
 TRAIN_BATCH_SIZE=${5:-1024}
 PPO_MINI_BATCH_SIZE=${6:-256}
 PPO_MICRO_BATCH_SIZE_PER_GPU=${7:-32}
@@ -16,7 +16,7 @@ GPU_MEMORY_UTIL=${10:-0.7}
 TEST_FREQ=${11:-3}
 N_GPUS=${12:-4}
 COMPUTE_PROMPTS_VALUES=${13:-False}
-EXPERIMENT_NAME=${14:-"ppo_Math1.5B_tok1k_dapo17k"}
+EXPERIMENT_NAME=${14:-"ppo_1.5B_MATH500_tok8k_val-only"}
 
 echo "Running with hyperparameters:"
 echo "Actor LR: $ACTOR_LR"
@@ -63,6 +63,7 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
  algorithm.kl_ctrl.kl_coef=$KL_COEF \
  trainer.logger=['console','wandb'] \
  +trainer.val_before_train=True\
+ trainer.val_only=True \
  trainer.default_hdfs_dir=null \
  trainer.n_gpus_per_node=$N_GPUS \
  trainer.nnodes=1 \

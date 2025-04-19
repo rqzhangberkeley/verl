@@ -196,13 +196,14 @@ trainer:
   remove_previous_ckpt_in_save: False
   del_local_ckpt_after_load: False
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  val_only: False
 
 curriculum:
   use_curriculum_learning: False
   train_batch_size_pool: 3072
   subsample_criterion: square-inverse
   p_thres: 0.5
-  warmup_steps: 2
+  warmup_steps: 15
 
 
 #########################
