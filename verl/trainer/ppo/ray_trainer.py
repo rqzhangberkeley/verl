@@ -912,7 +912,7 @@ class RayPPOTrainer(object):
         if not self.config.curriculum.use_curriculum_learning:
             # If not using curriculum learning, take max of total_training_steps and epochs * dataloader_size
             if hasattr(self.config.trainer, 'total_training_steps') and self.config.trainer.total_training_steps:
-                total_steps = max(self.config.trainer.total_training_steps, 
+                total_steps = min(self.config.trainer.total_training_steps, 
                          self.config.trainer.total_epochs * dataloader_size)
             else:
                 total_steps = self.config.trainer.total_epochs * dataloader_size
@@ -931,7 +931,7 @@ class RayPPOTrainer(object):
                 raise ValueError(f"warmup_steps must be a positive integer. Got {warmup_steps}.")
             
             if hasattr(self.config.trainer, 'total_training_steps') and self.config.trainer.total_training_steps:
-                total_steps = max(self.config.trainer.total_training_steps, total_steps)
+                total_steps = min(self.config.trainer.total_training_steps, total_steps)
             else:
                 pass
         pprint(f'######################## Total training steps: {total_steps} ########################')

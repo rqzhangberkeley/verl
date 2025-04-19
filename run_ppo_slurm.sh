@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=train-math12k       # Job name
+#SBATCH --job-name=train-DAPO-17k       # Job name
 #SBATCH --output=./logs/verl_ppo_%j.out  # Output file (%j will be replaced by job ID)
 #SBATCH --error=./logs/verl_ppo_%j.err   # Error file
 #SBATCH --nodes=1                 # Number of nodes
 #SBATCH --ntasks-per-node=1       # Number of tasks per node
 #SBATCH --cpus-per-task=256         # Number of CPU cores per task
-#SBATCH --gres=gpu:4              # Number of GPUs (4 GPUs per node)
+#SBATCH --gpus-per-node=4              # Number of GPUs (4 GPUs per node)
 #SBATCH --mem-per-gpu=100G                # Memory per node
-#SBATCH --time=12:00:00           # Time limit (24 hours)
+#SBATCH --time=24:00:00           # Time limit (24 hours)
 #SBATCH --account=bdwy-dtai-gh    # Account name (adjust to your account)
 #SBATCH --mail-user=rqzhang@berkeley.edu  # Email address to receive notifications
 #SBATCH --mail-type=BEGIN,END,FAIL         # Send email at begin, end, or fail of job

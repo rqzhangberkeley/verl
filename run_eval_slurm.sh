@@ -5,7 +5,7 @@
 #SBATCH --nodes=1                 # Number of nodes
 #SBATCH --ntasks-per-node=1       # Number of tasks per node
 #SBATCH --cpus-per-task=256         # Number of CPU cores per task
-#SBATCH --gres=gpu:4              # Number of GPUs (4 GPUs per node)
+#SBATCH --gpus-per-node=4              # Number of GPUs (4 GPUs per node)
 #SBATCH --mem-per-gpu=100G                # Memory per node
 #SBATCH --time=2:00:00           # Time limit (24 hours)
 #SBATCH --account=bdwy-dtai-gh    # Account name (adjust to your account)
