@@ -125,7 +125,7 @@ class HFRollout(BaseRollout):
 
         batch = TensorDict(
             {
-                'prompts': prompt,
+                'prompts': prompt, # RZ: prompts is just the  first prompt_length tokens in the input_ids
                 'responses': response,
                 'input_ids': seq,
                 'attention_mask': attention_mask,

@@ -285,6 +285,29 @@ class DataProto:
 
         return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors, meta_info=meta_info)
 
+    # RZ: ADDED BY RZ.
+    @classmethod
+    def from_multiple_dicts(cls, data: List[Dict[str, Union[torch.Tensor, np.ndarray]]], meta_info=None):
+        tensor = {}
+        non_tensor = {}
+        d = data[0]
+        for key, val in d.items():
+            if isinstance(val, torch.Tensor):
+                tensor[key] = val
+            elif isinstance(val, np.ndarray):
+                non_tensor[key] = val
+            else:
+                raise ValueError(f'Unsupported type in data {type(val)}')
+        for d in data[1:]:
+            for key, val in d.items():
+                if isinstance(val, torch.Tensor) and tensor[key].shape[0] == val.shape[0]:
+                    tensor[key] = torch.cat([tensor[key], val], dim=0)
+                elif isinstance(val, np.ndarray) and non_tensor[key].shape[0] == val.shape[0]:
+                    non_tensor[key] = np.concatenate([non_tensor[key], val], axis=0)
+                else:
+                    raise ValueError(f'Batch size mismatch for key {key}')
+        return DataProto.from_dict(tensors=tensor, non_tensors=non_tensor, meta_info=meta_info)
+
     @classmethod
     def from_dict(cls, tensors: Dict[str, torch.Tensor], non_tensors=None, meta_info=None, num_batch_dims=1):
         """Create a DataProto from a dict of tensors. This assumes that
@@ -594,6 +617,39 @@ class DataProto:
             non_tensor_batch=repeated_non_tensor_batch,
             meta_info=self.meta_info,
         )
+
+    def subsample(self, num_samples: int, subsample_criterion: str, criterion_values: torch.Tensor, eps: float = 1e-6):
+        """
+        Subsample the batch based on the subsample_criterion.
+        """
+        assert criterion_values.shape[0] == self.batch.batch_size[0], f"Criterion values shape {criterion_values.shape[0]} does not match batch size {self.batch.batch_size[0]}"
+
+        if self.batch.batch_size[0] <= num_samples: # If we do not need to subsample, return the original batch.
+            return self
+        
+        if subsample_criterion == 'square-inverse':
+            median_value = torch.median(criterion_values)
+            weights = 1 / ((criterion_values - median_value) ** 2 + eps)
+            weights = weights / weights.sum()
+            indices = torch.multinomial(weights, num_samples, replacement=False)
+        else:
+            raise NotImplementedError(f"Subsample criterion {subsample_criterion} not implemented")
+        
+        tensors = {}
+        batch_size = indices.shape[0]
+        for key, val in self.batch.items():
+            if key == 'prompts':
+                continue
+            else:
+                tensors[key] = val[indices,:]
+        tensor_dict = TensorDict(source=tensors, batch_size=batch_size)
+
+        non_tensor_dict = {}
+        for key, val in self.non_tensor_batch.items():
+            non_tensor_dict[key] = val[indices]
+        
+        meta_info = self.meta_info
+        return DataProto(batch=tensor_dict, non_tensor_batch=non_tensor_dict, meta_info=meta_info)
 
 
 import ray

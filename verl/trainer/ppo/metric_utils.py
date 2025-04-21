@@ -168,7 +168,7 @@ def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], n
         'perf/throughput': total_num_tokens / (time * n_gpus),
     }
 
-
+# RZ: Added by RZ.
 def compute_pass_rate_metrics(prompt_stats, prompt_value_avg=None):
     """Compute pass rate metrics and create visualization for wandb logging.
     
@@ -237,3 +237,17 @@ def compute_pass_rate_metrics(prompt_stats, prompt_value_avg=None):
         metric_dict['val/prompt_value/last_correlation_with_pass'] = value_last_correlation
     
     return metric_dict, wandb_plot
+
+# RZ: Added by RZ.
+def compute_curriculum_metrics(values: torch.Tensor) -> Dict[str, Any]:
+    """
+    Compute metrics for curriculum learning.
+    """
+    metrics = {}
+    metrics['curriculum/values/median'] = torch.median(values).detach().item()
+    metrics['curriculum/values/mean'] = torch.mean(values).detach().item()
+    metrics['curriculum/values/max'] = torch.max(values).detach().item()
+    metrics['curriculum/values/min'] = torch.min(values).detach().item()
+    metrics['curriculum/values/std'] = torch.std(values).detach().item()
+    return metrics
+

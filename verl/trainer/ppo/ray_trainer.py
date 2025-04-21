@@ -35,7 +35,7 @@ from verl.single_controller.base import Worker
 from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClassWithInitArgs
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
-from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics, compute_pass_rate_metrics
+from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics, compute_pass_rate_metrics, compute_curriculum_metrics
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
@@ -924,7 +924,7 @@ class RayPPOTrainer(object):
             # After warmup, batch_size = train_batch_size_pool
             batch_size_multiplier = self.config.curriculum.train_batch_size_pool // self.config.data.train_batch_size
             
-            if warmup_steps > 0:
+            if warmup_steps >= 0:
                 remaining_steps = (self.config.trainer.total_epochs * dataloader_size - warmup_steps) // batch_size_multiplier
                 total_steps = warmup_steps + remaining_steps
             else:
@@ -986,11 +986,7 @@ class RayPPOTrainer(object):
         # we start from step 1
         self.global_steps += 1
         last_val_metrics = None
-        
-        # TODO: if the train_dataloader needs updating, then we update it.
-        # TODO: The data_loader should have a batch size = self.config.curriculum.train_batch_size_pool.
-        # TODO: 
-        
+
         # Initialize curriculum learning parameters
         use_curriculum = self.config.curriculum.use_curriculum_learning
         warmup_steps = self.config.curriculum.warmup_steps if use_curriculum else 0
@@ -1008,33 +1004,39 @@ class RayPPOTrainer(object):
                 metrics = {}
                 timing_raw = {}
 
-                # Get first batch
-                try:
-                    batch_dict = next(dataloader_iterator)
-                except StopIteration:
-                    # End of epoch, break inner loop to create new iterator
-                    break
-
-                # Handle curriculum learning batch size
-                if use_curriculum and self.global_steps > warmup_steps:
-                    # Collect multiple batches and merge them
-                    merged_batch = batch_dict
-                    for _ in range(batch_size_multiplier - 1):
+                ################# RZ: Handle curriculum learning batch size #################
+                if use_curriculum and self.global_steps > warmup_steps and self.use_critic:
+                    batches = []
+                    for _ in range(batch_size_multiplier): # RZ: We get a large bunch of prompts.
                         try:
-                            next_batch = next(dataloader_iterator)
-                            # Merge batches along the batch dimension
-                            for key in merged_batch:
-                                if isinstance(merged_batch[key], torch.Tensor):
-                                    merged_batch[key] = torch.cat([merged_batch[key], next_batch[key]], dim=0)
-                                elif isinstance(merged_batch[key], list):
-                                    merged_batch[key].extend(next_batch[key])
+                            batch_dict = next(dataloader_iterator)
+                            batches.append(batch_dict)
                         except StopIteration:
-                            # If we run out of data, break and use what we have
-                            break
-                    batch: DataProto = DataProto.from_single_dict(merged_batch)
-                    # TODO: Compute values for the prompts of this batch.
-                    # TODO: Sample a batch from this batch.
+                            pass # RZ: If we run out of data, break and use what we have
+                    if batches:
+                        for batch_dict in batches:
+                            batch_dict['prompts'] = batch_dict['input_ids'][:, :self.config.data.max_prompt_length].clone() # RZ: In each batch, the 'prompts' is the first prompt_length tokens in the input_ids. See /home/jovyan/project/verl/verl/workers/rollout/hf_rollout.py line 113.
+                        batch: DataProto = DataProto.from_multiple_dicts(batches)
+                    else:
+                        break
+                    # Compute the prompts values for the batch.
+                    with _timer('values_prompts', timing_raw):
+                        values = self.critic_wg.compute_prompts_values(batch)
+
+                        #  RZ: Subsample.
+                        last_entry_values = values.batch['values'][:,-1]
+                        batch  = batch.subsample(
+                            num_samples = self.config.data.train_batch_size,
+                            criterion_values = last_entry_values,
+                            subsample_criterion = 'square-inverse'
+                        )
+                        metrics.update(compute_curriculum_metrics(values=last_entry_values))
+
                 else:
+                    try:
+                        batch_dict = next(dataloader_iterator)
+                    except StopIteration:
+                        break
                     batch: DataProto = DataProto.from_single_dict(batch_dict)
                 # RZ: A batch of prompts. Len(batch) = config.data.train_batch_size.
                 # It contains a batch (TensorDict):
